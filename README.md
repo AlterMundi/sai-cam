@@ -1,4 +1,4 @@
-## sai-cam
+# sai-cam
 ## SaiCam implementation on RaspberriPi 3 B+
 
 #### Install Raspberry Pi OS using Raspberry Pi Imager
