@@ -15,16 +15,12 @@ password: `admin`
 
 
 #### Install dependencies
-sudo apt install python3-full
-sudo apt install python3-opencv
+    sudo apt install python3-full
+    sudo apt install python3-opencv
 
 ###### campost/ folder contains main.py file thats forward images from cammera (USB or RTSP) to de SAI Firebot
 
-### SAI cammera control and access.
-
-
-
-## To install and run the service:
+### To install and run the service:
 
 1. Create a directory for the project:
 ```bash
