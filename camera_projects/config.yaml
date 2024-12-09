@@ -1,0 +1,30 @@
+camera:
+  resolution: [1280, 720]
+  fps: 30
+  jpeg_quality: 85
+  capture_interval: 10
+
+server:
+  url: 'https://sai.altermundi.net/firebot/upload-image'
+  ssl_verify: true
+  cert_path: '/etc/camera_service/cert.pem'
+  retry_attempts: 3
+  retry_delay: 5
+  timeout: 10
+
+storage:
+  base_path: '/home/admin/camera_storage'
+  max_size_gb: 5
+  cleanup_threshold_gb: 4.5
+  retention_days: 7
+
+monitoring:
+  health_check_interval: 300
+  restart_on_failure: true
+  max_memory_percent: 80
+  max_cpu_percent: 90
+
+compression:
+  enabled: true
+  target_size_kb: 500
+  min_quality: 60
