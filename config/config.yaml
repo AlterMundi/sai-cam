@@ -1,7 +1,7 @@
 camera:
   resolution: [1280, 720]
   fps: 30
-  capture_interval: 10
+  capture_interval: 300
 
 storage:
   base_path: '/opt/camera_service/storage'
