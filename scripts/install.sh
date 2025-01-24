@@ -42,7 +42,7 @@ check_required_files() {
         required_files=(
             "$PROJECT_ROOT/src/camera_service.py"
             "$PROJECT_ROOT/config/config.yaml"
-            "$PROJECT_ROOT/systemd/camera-service.service"
+            "$PROJECT_ROOT/systemd/sai-cam.service"
             "$PROJECT_ROOT/systemd/logrotate.conf"
             "$PROJECT_ROOT/requirements.txt"
         )
@@ -129,7 +129,7 @@ sudo mkdir -p $LOG_DIR
 # Install system dependencies
 echo "Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-opencv python3-venv
+sudo apt-get install -y python3-pip python3-opencv python3-venv libsystemd-dev
 
 # Set up virtual environment
 echo "Setting up Python virtual environment..."
@@ -141,7 +141,7 @@ $INSTALL_DIR/venv/bin/pip3 install -r $PROJECT_ROOT/requirements.txt
 echo "Copying service files..."
 sudo cp $PROJECT_ROOT/src/camera_service.py $INSTALL_DIR/bin/
 sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
-sudo cp $PROJECT_ROOT/systemd/camera-service.service /etc/systemd/system/sai-cam.service
+sudo cp $PROJECT_ROOT/systemd/sai-cam.service /etc/systemd/system/sai-cam.service
 sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
 
 # Set permissions
