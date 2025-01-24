@@ -135,7 +135,8 @@ class CameraCapture:
                 if image_data:
                     self.upload_image(image_data)
 
-                time.sleep(self.capture_interval)
+                time.sleep(300)
+#                time.sleep(self.capture_interval)
 
             except KeyboardInterrupt:
                 logger.info("Programa terminado por el usuario")

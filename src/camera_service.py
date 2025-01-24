@@ -77,6 +77,7 @@ class CameraService:
     def setup_storage(self):
         """Initialize local storage system"""
         storage_config = self.config['storage']
+
         self.storage_path = Path('/opt/sai-cam/storage')
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
