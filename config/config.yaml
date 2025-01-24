@@ -1,0 +1,15 @@
+camera:
+  resolution: [1280, 720]
+  fps: 30
+  capture_interval: 10
+
+storage:
+  base_path: '/opt/camera_service/storage'
+  max_size_gb: 5
+  cleanup_threshold_gb: 4.5
+
+monitoring:
+  health_check_interval: 300
+  max_memory_percent: 80
+  max_cpu_percent: 90
+

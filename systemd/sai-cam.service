@@ -1,0 +1,25 @@
+[Unit]
+Description=SAI Camera Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/opt/sai-cam
+Environment=PYTHONPATH=/opt/sai-cam
+ExecStart=/opt/sai-cam/venv/bin/python3 /opt/sai-cam/bin/camera_service.py
+Restart=always
+RestartSec=10
+
+# Basic watchdog
+WatchdogSec=30
+NotifyAccess=all
+
+# Logging
+StandardOutput=append:/var/log/sai-cam/service.log
+StandardError=append:/var/log/sai-cam/error.log
+
+[Install]
+WantedBy=multi-user.target
