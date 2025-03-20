@@ -101,7 +101,7 @@ class CameraCapture:
                 data['prompt'] = self.camera_config.prompt
 
             headers = {
-                "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Im44bldlYmhvb2tBY2Nlc3MiLCJpYXQiOjE2NzY0MDI4MDAsImV4cCI6MTcwNzk2MDgwMCwiaXNzIjoibjhuQXBpIiwiYXVkIjoid2ViaG9va0NsaWVudCJ9.HKt6HB1KChxEXUusXBFrFupyxUhr0C2WW5IEfKwYZnw"
+                "Authorization": "YOUR API KEY"
             }
 
             response = requests.post(
@@ -168,8 +168,7 @@ def main():
 
     # Ejemplo de configuraciÃ³n para cÃ¡mara RTSP
     rtsp_config = CameraConfig(
-#        source="""rtsp://admin:Saicam1!@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0""",
-        source="rtsp://admin:AZFPBR@10.128.72.78:554/Streaming/Channels/101",
+        source="rtsp://YOUR CAMERA URL",
 	type='rtsp',
         prompt=args.prompt  # Pass optional prompt from command line
     )
