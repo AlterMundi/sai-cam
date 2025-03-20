@@ -175,7 +175,7 @@ def main():
 
     # Usa la configuraciÃ³n que necesites
     camera = CameraCapture(
-        microservice_url='https://ai.altermundi.net/pipelines/webhook/upload-image',
+        microservice_url='MODEL URL',
         capture_interval=300,
         camera_config=rtsp_config  # o usb_config
 #        camera_config=usb_config  # o usb_config
