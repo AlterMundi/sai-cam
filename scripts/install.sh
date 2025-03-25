@@ -43,6 +43,7 @@ check_required_files() {
             "$PROJECT_ROOT/src/camera_service.py"
             "$PROJECT_ROOT/config/config.yaml"
             "$PROJECT_ROOT/systemd/sai-cam.service"
+            "$PROJECT_ROOT/systemd/sai-network.service"
             "$PROJECT_ROOT/systemd/logrotate.conf"
             "$PROJECT_ROOT/requirements.txt"
         )
@@ -79,6 +80,12 @@ backup_existing_config() {
             if [ -f "/etc/systemd/system/sai-cam.service" ]; then
                 sudo cp "/etc/systemd/system/sai-cam.service" "$BACKUP_DIR/$TIMESTAMP/"
                 echo "Service file backup created at: $BACKUP_DIR/$TIMESTAMP/sai-cam.service"
+            fi
+
+            # Backup systemd service file if it exists
+            if [ -f "/etc/systemd/system/sai-network.service" ]; then
+                sudo cp "/etc/systemd/system/sai-network.service" "$BACKUP_DIR/$TIMESTAMP/"
+                echo "Service file backup created at: $BACKUP_DIR/$TIMESTAMP/sai-network.service"
             fi
 
             # Backup logrotate config if it exists
@@ -142,6 +149,7 @@ echo "Copying service files..."
 sudo cp $PROJECT_ROOT/src/camera_service.py $INSTALL_DIR/bin/
 sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
 sudo cp $PROJECT_ROOT/systemd/sai-cam.service /etc/systemd/system/sai-cam.service
+sudo cp $PROJECT_ROOT/systemd/sai-network.service /etc/systemd/system/sai-network.service
 sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
 
 # Set permissions
@@ -150,12 +158,15 @@ sudo chown -R admin:admin $INSTALL_DIR
 sudo chown -R admin:admin $LOG_DIR
 sudo chmod 644 $CONFIG_DIR/config.yaml
 sudo chmod 644 /etc/systemd/system/sai-cam.service
+sudo chmod 644 /etc/systemd/system/sai-network.service
 sudo chmod 644 /etc/logrotate.d/sai-cam
 sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
 
 # Enable and start service
 echo "Enabling and starting service..."
 sudo systemctl daemon-reload
+sudo systemctl enable sai-network
+sudo systemctl start sai-network
 sudo systemctl enable sai-cam
 sudo systemctl start sai-cam
 
