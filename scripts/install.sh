@@ -42,6 +42,7 @@ check_required_files() {
         required_files=(
             "$PROJECT_ROOT/src/camera_service.py"
             "$PROJECT_ROOT/config/config.yaml"
+            "$PROJECT_ROOT/config/camera-proxy"
             "$PROJECT_ROOT/systemd/sai-cam.service"
             "$PROJECT_ROOT/systemd/sai-network.service"
             "$PROJECT_ROOT/systemd/logrotate.conf"
@@ -136,7 +137,7 @@ sudo mkdir -p $LOG_DIR
 # Install system dependencies
 echo "Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-opencv python3-venv libsystemd-dev
+sudo apt-get install -y python3-pip python3-opencv python3-venv libsystemd-dev nginx
 
 # Set up virtual environment
 echo "Setting up Python virtual environment..."
@@ -148,6 +149,7 @@ $INSTALL_DIR/venv/bin/pip3 install -r $PROJECT_ROOT/requirements.txt
 echo "Copying service files..."
 sudo cp $PROJECT_ROOT/src/camera_service.py $INSTALL_DIR/bin/
 sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
+sudo cp $PROJECT_ROOT/config/camera-proxy /etc/nginx/sites-available/
 sudo cp $PROJECT_ROOT/systemd/sai-cam.service /etc/systemd/system/sai-cam.service
 sudo cp $PROJECT_ROOT/systemd/sai-network.service /etc/systemd/system/sai-network.service
 sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
@@ -157,10 +159,16 @@ echo "Setting file permissions..."
 sudo chown -R admin:admin $INSTALL_DIR
 sudo chown -R admin:admin $LOG_DIR
 sudo chmod 644 $CONFIG_DIR/config.yaml
+sudo chmod 644 /etc/nginx/sites-available/camera-proxy
 sudo chmod 644 /etc/systemd/system/sai-cam.service
 sudo chmod 644 /etc/systemd/system/sai-network.service
 sudo chmod 644 /etc/logrotate.d/sai-cam
 sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
+
+# Setup a Camera Proxy for the node
+sudo ln -s /etc/nginx/sites-available/camera-proxy /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
 
 # Enable and start service
 echo "Enabling and starting service..."
