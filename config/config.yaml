@@ -1,10 +1,17 @@
-camera:
-  type: 'rtsp'
-#  rtsp_url: 'rtsp://admin:UUVQNA@192.168.4.229:554/Streaming/Channels/101'
-  rtsp_url: 'rtsp://admin:Saicam1!@192.168.1.64:554/Streaming/Channels/101'
-  resolution: [1280, 720]
-  fps: 30
-  capture_interval: 300  # 5 minutes between captures
+cameras:
+  - id: 'cam1'
+    type: 'rtsp'
+    rtsp_url: 'rtsp://admin:Saicam1!@192.168.1.64:554/Streaming/Channels/101'
+    resolution: [1280, 720]
+    fps: 30
+    capture_interval: 300  # 5 minutes between captures
+  
+  - id: 'cam2'
+    type: 'rtsp'
+    rtsp_url: 'rtsp://admin:UUVQNA@192.168.4.229:554/Streaming/Channels/101'
+    resolution: [1280, 720]
+    fps: 30
+    capture_interval: 300  # 5 minutes between captures
 
 storage:
   base_path: '/opt/sai-cam/storage'
@@ -17,6 +24,7 @@ server:
   ssl_verify: true
   cert_path: '/etc/ssl/certs/ca-certificates.crt'  # Default cert path
   timeout: 30  # 30 seconds timeout for uploads
+  auth_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Im44bldlYmhvb2tBY2Nlc3MiLCJpYXQiOjE2NzY0MDI4MDAsImV4cCI6MTcwNzk2MDgwMCwiaXNzIjoibjhuQXBpIiwiYXVkIjoid2ViaG9va0NsaWVudCJ9.HKt6HB1KChxEXUusXBFrFupyxUhr0C2WW5IEfKwYZnw'  # Authentication token
 
 device:
   id: 'cam001'  # Unique identifier for this camera node
@@ -28,3 +36,20 @@ monitoring:
   max_cpu_percent: 90
   restart_on_failure: true
 
+logging:
+  level: 'INFO'  # Can be DEBUG, INFO, WARNING, ERROR
+  log_dir: '/var/log/sai-cam'
+  log_file: 'camera_service.log'
+  max_size_bytes: 10485760  # 10MB
+  backup_count: 5
+
+advanced:
+  # Camera and frame handling
+  ffmpeg_debug: false
+  ffmpeg_options: 'rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128|pixel_format;yuv420p'
+  camera_init_wait: 2  # Seconds to wait after camera initialization
+  polling_interval: 0.1  # Seconds to wait between frame grabbing
+  
+  # Network and reconnection
+  reconnect_attempts: 3
+  reconnect_delay: 5  # Seconds between reconnection attempts

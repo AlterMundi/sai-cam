@@ -10,7 +10,7 @@ import yaml
 import signal
 import argparse
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Lock
 from queue import Queue
 import ssl
 import shutil
@@ -20,24 +20,183 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import json
 from systemd import daemon
+from concurrent.futures import ThreadPoolExecutor
+import copy
 
-VERSION = "0.0.1"
+VERSION = "0.1.0"  # Version bump for multi-camera support
 
 # Force FFMPEG to use TCP transport for all RTSP connections
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128|pixel_format;yuv420p"
+
+class CameraInstance:
+    """Represents a single camera instance with its own configuration and state"""
+    
+    def __init__(self, camera_id, camera_config, global_config, logger, storage_manager, upload_queue):
+        self.camera_id = camera_id
+        self.config = camera_config
+        self.global_config = global_config
+        self.logger = logger
+        self.storage_manager = storage_manager
+        self.upload_queue = upload_queue
+        self.cap = None
+        self.running = True
+        self.timestamp_last_image = time.time() - self.config.get('capture_interval', 300)
+        self.lock = Lock()
+        
+    def setup_camera(self):
+        """Initialize this specific camera"""
+        try:
+            self.logger.info(f"Camera {self.camera_id}: Initializing with URL: {self.config['rtsp_url']}")
+            
+            with self.lock:
+                # Initialize the capture with FFMPEG backend
+                self.cap = cv2.VideoCapture(self.config['rtsp_url'], cv2.CAP_FFMPEG)
+                
+                # Set camera properties
+                if 'fps' in self.config:
+                    self.cap.set(cv2.CAP_PROP_FPS, self.config['fps'])
+                    self.logger.debug(f"Camera {self.camera_id}: FPS set to {self.config['fps']}")
+                    
+                if 'resolution' in self.config and len(self.config['resolution']) == 2:
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config['resolution'][0])
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config['resolution'][1])
+                    self.logger.debug(f"Camera {self.camera_id}: Resolution set to {self.config['resolution'][0]}x{self.config['resolution'][1]}")
+                
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 0)
+                
+                # Wait for initialization
+                init_wait = self.global_config.get('advanced', {}).get('camera_init_wait', 2)
+                time.sleep(init_wait)
+                
+                if not self.cap.isOpened():
+                    self.logger.error(f"Camera {self.camera_id}: Failed to initialize at {self.config['rtsp_url']}")
+                    return False
+                
+                # Get actual camera properties
+                actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+                self.logger.info(f"Camera {self.camera_id}: Initialized successfully: {actual_width}x{actual_height} @ {actual_fps:.1f}fps")
+                
+            return True
+                
+        except Exception as e:
+            self.logger.error(f"Camera {self.camera_id}: Setup error: {str(e)}", exc_info=True)
+            return False
+    
+    def validate_image(self, frame):
+        """Validate the image from this camera"""
+        if frame is None or frame.size == 0:
+            return False
+        # Check for completely black or white frames
+        avg_value = cv2.mean(frame)[0]
+        if avg_value < 5 or avg_value > 250:
+            return False
+        return True
+    
+    def reconnect_camera(self):
+        """Reconnect this specific camera"""
+        self.logger.warning(f"Camera {self.camera_id}: Attempting reconnection")
+        with self.lock:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+        
+        reconnect_delay = self.global_config.get('advanced', {}).get('reconnect_delay', 5)
+        time.sleep(reconnect_delay)
+        return self.setup_camera()
+        
+    def capture_images(self):
+        """Capture images from this specific camera"""
+        polling_interval = self.global_config.get('advanced', {}).get('polling_interval', 0.1)
+        
+        while self.running:
+            try:
+                current_time = time.time()
+                interval = self.config.get('capture_interval', 300)
+                
+                if current_time - self.timestamp_last_image < interval:
+                    # Read and discard frames
+                    with self.lock:
+                        if self.cap and self.cap.isOpened():
+                            self.cap.grab()
+                    time.sleep(polling_interval)
+                    continue
+                
+                with self.lock:
+                    if not self.cap or not self.cap.isOpened():
+                        if not self.reconnect_camera():
+                            reconnect_delay = self.global_config.get('advanced', {}).get('reconnect_delay', 5)
+                            time.sleep(reconnect_delay)
+                            continue
+                    
+                    self.logger.debug(f"Camera {self.camera_id}: Capturing new frame")
+                    ret, frame = self.cap.read()
+                
+                if not ret or not self.validate_image(frame):
+                    self.logger.warning(f"Camera {self.camera_id}: Failed to capture valid frame")
+                    self.reconnect_camera()
+                    time.sleep(1)
+                    continue
+                
+                # Add timestamp and camera ID
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                cv2.putText(frame, f"{self.camera_id}: {timestamp}", (10, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                
+                # Add metadata
+                metadata = {
+                    'timestamp': timestamp,
+                    'device_id': self.global_config['device']['id'],
+                    'camera_id': self.camera_id,
+                    'location': self.global_config['device']['location'],
+                    'version': VERSION
+                }
+                
+                # Encode and compress
+                _, buffer = cv2.imencode('.jpg', frame)
+                image_data = buffer.tobytes()
+                
+                # Store locally and queue for upload
+                filename = f"{self.camera_id}_{timestamp}.jpg"
+                img_size = len(image_data) / 1024
+                self.logger.info(f"Camera {self.camera_id}: Captured image {filename} ({img_size:.1f}KB)")
+                
+                self.storage_manager.store_image(image_data, filename, metadata)
+                
+                # Add to upload queue if uploads are enabled
+                self.upload_queue.put((filename, image_data, metadata, self.camera_id))
+                
+                # Update timestamp for next capture
+                self.timestamp_last_image = current_time
+                self.logger.debug(f"Camera {self.camera_id}: Next capture in {interval}s")
+                
+            except Exception as e:
+                self.logger.error(f"Camera {self.camera_id}: Capture error: {str(e)}", exc_info=True)
+                time.sleep(1)
+    
+    def stop(self):
+        """Stop this camera instance"""
+        self.running = False
+        with self.lock:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+        self.logger.info(f"Camera {self.camera_id}: Stopped")
 
 class CameraService:
     def __init__(self, config_path='/etc/sai-cam/config.yaml'):
         """Initialize the camera service with all required components"""
         self.config_path = config_path
         self.upload_enabled = True
-        self.show_preview = False
+        self.camera_instances = {}
+        self.camera_threads = {}
         self.load_config()
         self.setup_logging()
         self.setup_storage()
         self.setup_queues()
         self.setup_ssl()
-        self.setup_camera()
+        self.setup_cameras()
         self.setup_monitoring()
         self.setup_watchdog()
 
@@ -50,22 +209,30 @@ class CameraService:
             sys.exit(f"Failed to load configuration: {e}")
 
     def setup_logging(self):
-        """Configure logging with rotation"""
-        log_dir = '/var/log/sai-cam'
+        """Configure structured logging with rotation and consistent levels"""
+        log_dir = self.config.get('logging', {}).get('log_dir', '/var/log/sai-cam')
         os.makedirs(log_dir, exist_ok=True)
 
         self.logger = logging.getLogger('SAICam')
+        # Clear any existing handlers to prevent duplicates
+        if self.logger.handlers:
+            self.logger.handlers = []
+            
+        # Set the base log level from command line args or config
+        log_level = getattr(logging, self.config.get('logging', {}).get('level', 'INFO'))
+        self.logger.setLevel(log_level)
 
+        # Create a more structured formatter with consistent fields
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            '%(asctime)s [%(name)s] [%(levelname)s] [%(process)d] [v' + VERSION + '] %(message)s'
         )
 
         # File handler with rotation
         from logging.handlers import RotatingFileHandler
         file_handler = RotatingFileHandler(
-            f'{log_dir}/camera_service.log',
-            maxBytes=10*1024*1024,  # 10MB
-            backupCount=5
+            f"{log_dir}/{self.config.get('logging', {}).get('log_file', 'camera_service.log')}",
+            maxBytes=self.config.get('logging', {}).get('max_size_bytes', 10*1024*1024),
+            backupCount=self.config.get('logging', {}).get('backup_count', 5)
         )
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
@@ -76,12 +243,14 @@ class CameraService:
         self.logger.addHandler(console_handler)
 
         self.logger.info(f"Starting SAI Camera Service v{VERSION}")
+        self.logger.debug(f"Configuration loaded from: {self.config_path}")
+        self.logger.debug(f"Logging level set to: {logging.getLevelName(self.logger.level)}")
 
     def setup_storage(self):
         """Initialize local storage system"""
         storage_config = self.config['storage']
 
-        self.storage_path = Path('/opt/sai-cam/storage')
+        self.storage_path = Path(storage_config['base_path'])
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
         self.storage_manager = StorageManager(
@@ -107,56 +276,135 @@ class CameraService:
                 self.config['server']['cert_path']
             )
 
-    def setup_camera(self):
-        """Initialize and configure the camera"""
+    def setup_cameras(self):
+        """Initialize and configure all cameras from config"""
         try:
-            # Uncoment for ffmpeg debug information
-            os.environ["OPENCV_FFMPEG_DEBUG"] = "1"
-
-            # Initialize the capture with FFMPEG backend
-            self.cap = cv2.VideoCapture(self.config['camera']['rtsp_url'], cv2.CAP_FFMPEG)
-
-#            if self.config['camera']['type'] == 'rtsp':
-#            self.cap = cv2.VideoCapture(self.config['camera']['rtsp_url'])
-#            self.cap = cv2.VideoCapture("rtsp://admin:UUVQNA@192.168.4.229:554/Streaming/Channels/101")
-#                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-#                self.cap.set(cv2.CAP_PROP_RTSP_TRANSPORT, 0)  # 0 for TCP (might vary by OpenCV version)
-#            else:
-#                self.cap = cv2.VideoCapture(0)  # USB camera
-
-            # Set Resolution explicit
-#            resolution = self.config['camera']['resolution']
-#            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
-#            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
-            # Set fps explicit
-#            self.cap.set(cv2.CAP_PROP_FPS, self.config['camera']['fps'])
-            self.cap.set(cv2.CAP_PROP_FPS, 30)
-            # Configure for TCP transport
-#            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'H264'))
-#            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'HEVC'))
-#            self.cap.set(cv2.CAP_PROP_RTSP_TRANSPORT, 0)  # 0 = TCP
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 0)
-
-            # Set higher timeouts
-#            self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)
-#            self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000)
-            # Wait for initialization
-            time.sleep(2)
-
-            if not self.cap.isOpened():
-                self.logger.error("Failed to initialize camera")
+            # Set FFMPEG debug based on config
+            os.environ["OPENCV_FFMPEG_DEBUG"] = "1" if self.config.get('advanced', {}).get('ffmpeg_debug', False) else "0"
+            
+            # Check if we have multiple cameras or single camera config
+            if 'cameras' in self.config:
+                cameras_config = self.config['cameras']
+                self.logger.info(f"Initializing {len(cameras_config)} cameras")
+            else:
+                # Backward compatibility: Create a single camera config
+                cameras_config = [{
+                    'id': 'cam1',
+                    'type': self.config['camera'].get('type', 'rtsp'),
+                    'rtsp_url': self.config['camera']['rtsp_url'],
+                    'resolution': self.config['camera'].get('resolution', [1280, 720]),
+                    'fps': self.config['camera'].get('fps', 30),
+                    'capture_interval': self.config['camera'].get('capture_interval', 300)
+                }]
+                self.logger.info("Using legacy single-camera configuration")
+            
+            # Initialize each camera instance
+            for cam_config in cameras_config:
+                cam_id = cam_config['id']
+                self.logger.info(f"Setting up camera {cam_id}")
+                
+                # Create camera instance
+                instance = CameraInstance(
+                    camera_id=cam_id,
+                    camera_config=cam_config,
+                    global_config=self.config,
+                    logger=self.logger,
+                    storage_manager=self.storage_manager,
+                    upload_queue=self.upload_queue
+                )
+                
+                # Initialize camera
+                if instance.setup_camera():
+                    self.camera_instances[cam_id] = instance
+                else:
+                    self.logger.error(f"Failed to initialize camera {cam_id}")
+            
+            if not self.camera_instances:
+                self.logger.error("No cameras were successfully initialized")
                 sys.exit(1)
-
-#            self.logger.info(f"Camera initialized successfully: {resolution}")
-            self.logger.info(f"Camera initialized successfully.")
-
-            # Initialize a variable to check interval between uploads
-            self.timestamp_last_image = time.time() - self.config['camera']['capture_interval']
-
+                
+            self.logger.info(f"Successfully initialized {len(self.camera_instances)} cameras")
 
         except Exception as e:
-            self.logger.error(f"Camera setup error: {e}")
+            self.logger.error(f"Camera initialization error: {str(e)}", exc_info=True)
             sys.exit(1)
+
+    def start_capture_threads(self):
+        """Start capture threads for all camera instances"""
+        for cam_id, instance in self.camera_instances.items():
+            if cam_id not in self.camera_threads or not self.camera_threads[cam_id].is_alive():
+                thread = Thread(
+                    target=instance.capture_images,
+                    name=f"Camera-{cam_id}"
+                )
+                thread.daemon = True
+                thread.start()
+                self.camera_threads[cam_id] = thread
+                self.logger.info(f"Started capture thread for camera {cam_id}")
+
+    def capture_images(self):
+        """Main capture coordinator - starts individual camera threads"""
+        self.start_capture_threads()
+        while self.running:
+            # Monitor camera threads and restart if needed
+            alive_threads = sum(1 for t in self.camera_threads.values() if t.is_alive())
+            if alive_threads < len(self.camera_instances) and self.running:
+                self.logger.warning(f"Only {alive_threads}/{len(self.camera_instances)} camera threads are running, restarting failed threads")
+                self.start_capture_threads()
+            time.sleep(10)
+
+    def compress_image(self, image_data):
+        """Compress image data if needed"""
+        # For simple implementation, just return the data
+        # For better performance, could use PIL or other compression
+        return image_data
+
+    def disable_upload(self):
+        """Disable image upload for local testing"""
+        self.upload_enabled = False
+        self.logger.info("Upload disabled - running in local save mode")
+
+    def upload_images(self):
+        """Upload images to server"""
+        if not self.upload_enabled:
+            self.logger.info("Upload functionality disabled")
+            return
+
+        while self.running:
+            try:
+                if not self.upload_queue.empty():
+                    filename, image_data, metadata, camera_id = self.upload_queue.get()
+                    img_size = len(image_data) / 1024
+                    self.logger.info(f"Camera {camera_id}: Uploading {filename} ({img_size:.1f}KB) to {self.config['server']['url']}")
+
+                    files = {
+                        'image': (filename, image_data, 'image/jpeg'),
+                        'metadata': ('metadata.json', json.dumps(metadata), 'application/json')
+                    }
+
+                    headers = {
+                        "Authorization": f"Bearer {self.config['server']['auth_token']}",
+                    }
+
+                    response = requests.post(
+                        self.config['server']['url'],
+                        headers=headers,
+                        files=files,
+                        verify=self.config['server']['ssl_verify'],
+                        timeout=self.config['server']['timeout']
+                    )
+
+                    if response.status_code == 200:
+                        self.storage_manager.mark_as_uploaded(filename)
+                        response_time = response.elapsed.total_seconds()
+                        self.logger.info(f"Successfully uploaded {filename} in {response_time:.2f}s")
+                    else:
+                        self.logger.error(f"Upload failed for {filename}: HTTP {response.status_code} - {response.text[:100]}")
+
+                time.sleep(0.1)
+            except Exception as e:
+                self.logger.error(f"Upload error: {str(e)}", exc_info=True)
+                time.sleep(1)
 
     def setup_monitoring(self):
         """Initialize system monitoring"""
@@ -186,136 +434,17 @@ class CameraService:
             self.send_watchdog_notification()
             time.sleep(self.watchdog_usec/2000000)  # Sleep for half the timeout period
 
-    def enable_preview(self):
-        """Enable camera preview window for testing"""
-        self.show_preview = True
-        self.logger.info("Preview mode enabled")
-
-    def disable_upload(self):
-        """Disable image upload for local testing"""
-        self.upload_enabled = False
-        self.logger.info("Upload disabled - running in local save mode")
-
-    def validate_image(self, frame):
-        """Basic image validation"""
-        if frame is None or frame.size == 0:
-            return False
-        # Check for completely black or white frames
-        avg_value = cv2.mean(frame)[0]
-        if avg_value < 5 or avg_value > 250:
-            return False
-        return True
-
-    def capture_images(self):
-        """Capture images from camera"""
-        while self.running:
-            try:
-              if ( time.time() - self.timestamp_last_image < self.config['camera']['capture_interval'] ):
-                # Read and discard frames
-                self.cap.grab()
-              else:
-#                # Read and discard the first several frames
- #               for _ in range(10):
-  #                  self.cap.grab()
-                ret, frame = self.cap.read()
-                if not ret or not self.validate_image(frame):
-                    self.logger.warning("Failed to capture valid frame")
-                    self.reconnect_camera()
-                    continue
-
-                # Show preview if enabled
-                if self.show_preview:
-                    cv2.imshow('Camera Preview', frame)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        self.running = False
-                        break
-
-                # Add timestamp
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                cv2.putText(frame, timestamp, (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-                # Add metadata
-                metadata = {
-                    'timestamp': timestamp,
-                    'device_id': self.config['device']['id'],
-                    'location': self.config['device']['location'],
-                    'version': VERSION
-                }
-
-                # Encode and compress
-                _, buffer = cv2.imencode('.jpg', frame)
-                image_data = self.compress_image(buffer.tobytes())
-
-                # Store locally and queue for upload
-                filename = f"{timestamp}.jpg"
-                self.storage_manager.store_image(image_data, filename, metadata)
-
-                if self.upload_enabled:
-                    self.upload_queue.put((filename, image_data, metadata))
-
-#                time.sleep(self.config['camera']['capture_interval'])
-                # Update variable to check interval between uploads
-                self.timestamp_last_image = time.time()
-
-            except Exception as e:
-                self.logger.error(f"Capture error: {e}")
-                time.sleep(1)
-
-    def compress_image(self, image_data):
-        """Compress image data if needed"""
-        # For simple implementation, just return the data
-        # For better performance, could use PIL or other compression
-        return image_data
-
-    def upload_images(self):
-        """Upload images to server"""
-        if not self.upload_enabled:
-            return
-
-        while self.running:
-            try:
-                if not self.upload_queue.empty():
-                    filename, image_data, metadata = self.upload_queue.get()
-
-                    files = {
-                        'image': (filename, image_data, 'image/jpeg'),
-                        'metadata': ('metadata.json', json.dumps(metadata), 'application/json')
-                    }
-
-                    headers = {
-                        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Im44bldlYmhvb2tBY2Nlc3MiLCJpYXQiOjE2NzY0MDI4MDAsImV4cCI6MTcwNzk2MDgwMCwiaXNzIjoibjhuQXBpIiwiYXVkIjoid2ViaG9va0NsaWVudCJ9.HKt6HB1KChxEXUusXBFrFupyxUhr0C2WW5IEfKwYZnw",
-                    }
-
-                    response = requests.post(
-                        self.config['server']['url'],
-                        headers=headers,
-                        files=files,
-                        verify=self.config['server']['ssl_verify'],
-                        timeout=self.config['server']['timeout']
-                    )
-
-                    if response.status_code == 200:
-                        self.storage_manager.mark_as_uploaded(filename)
-                        self.logger.debug(f"Successfully uploaded {filename}")
-                    else:
-                        self.logger.error(f"Upload failed: {response.status_code}")
-
-                time.sleep(0.1)
-            except Exception as e:
-                self.logger.error(f"Upload error: {e}")
-
     def run(self):
         """Main service run method"""
         threads = [
-            Thread(target=self.capture_images),
-            Thread(target=self.upload_images),
-            Thread(target=self.health_monitor.run),
-            Thread(target=self.storage_manager.run_cleanup_thread)
+            Thread(target=self.capture_images, name="CaptureCoordinator"),
+            Thread(target=self.upload_images, name="UploadProcessor"),
+            Thread(target=self.health_monitor.run, name="HealthMonitor"),
+            Thread(target=self.storage_manager.run_cleanup_thread, name="StorageManager")
         ]
 
         if self.watchdog_usec:
-            threads.append(Thread(target=self.watchdog_loop))
+            threads.append(Thread(target=self.watchdog_loop, name="WatchdogNotifier"))
 
         for thread in threads:
             thread.daemon = True  # Ensure threads terminate with main process
@@ -341,10 +470,12 @@ class CameraService:
     def cleanup(self):
         """Clean up resources"""
         self.running = False
-        if hasattr(self, 'cap') and self.cap is not None:
-            self.cap.release()
-        if self.show_preview:
-            cv2.destroyAllWindows()
+        
+        # Stop all camera instances
+        for cam_id, instance in self.camera_instances.items():
+            self.logger.info(f"Stopping camera {cam_id}")
+            instance.stop()
+            
         self.logger.info("Service stopped")
         sys.exit(0)
 
@@ -353,13 +484,6 @@ class CameraService:
         self.logger.info("Restarting service...")
         self.cleanup()
         os.execv(sys.executable, ['python'] + sys.argv)
-
-    def reconnect_camera(self):
-        """Attempt to reconnect to the camera"""
-        if hasattr(self, 'cap') and self.cap is not None:
-            self.cap.release()
-        time.sleep(2)
-        self.setup_camera()
 
 class StorageManager:
     def __init__(self, base_path, max_size_gb, cleanup_threshold_gb,
@@ -393,25 +517,30 @@ class StorageManager:
         """Store image and its metadata"""
         try:
             # Check storage limits before storing
-            if self.get_current_size_gb() >= self.max_size_gb:
-                self.logger.warning("Storage limit reached, forcing cleanup")
+            current_size = self.get_current_size_gb()
+            self.logger.debug(f"Current storage usage: {current_size:.2f}GB/{self.max_size_gb}GB")
+            if current_size >= self.max_size_gb:
+                self.logger.warning(f"Storage limit reached ({current_size:.2f}GB/{self.max_size_gb}GB), forcing cleanup")
                 self.cleanup_old_files()
 
             # Store image
             file_path = self.base_path / filename
             with open(file_path, 'wb') as f:
                 f.write(image_data)
+            self.logger.debug(f"Image saved to: {file_path}")
 
             # Store metadata if provided
             if metadata:
                 metadata_file = self.metadata_path / f"{filename}.json"
                 with open(metadata_file, 'w') as f:
                     json.dump(metadata, f)
+                self.logger.debug(f"Metadata saved to: {metadata_file}")
 
-            self.logger.debug(f"Stored image: {filename}")
+            img_size = len(image_data) / 1024
+            self.logger.info(f"Stored image: {filename} ({img_size:.1f}KB)")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to store image {filename}: {e}")
+            self.logger.error(f"Failed to store image {filename}: {str(e)}", exc_info=True)
             return False
 
     def mark_as_uploaded(self, filename):
@@ -433,7 +562,7 @@ class StorageManager:
             self.logger.debug(f"Marked as uploaded: {filename}")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to mark {filename} as uploaded: {e}")
+            self.logger.error(f"Failed to mark {filename} as uploaded: {str(e)}", exc_info=True)
             return False
 
     def cleanup_old_files(self):
@@ -482,7 +611,7 @@ class StorageManager:
                 self.logger.info(f"Cleanup completed. New size: {self.get_current_size_gb():.2f}GB")
 
         except Exception as e:
-            self.logger.error(f"Cleanup error: {e}")
+            self.logger.error(f"Cleanup error: {str(e)}", exc_info=True)
 
     def run_cleanup_thread(self):
         """Run periodic cleanup"""
@@ -491,7 +620,7 @@ class StorageManager:
                 self.cleanup_old_files()
                 time.sleep(3600)  # Check every hour
             except Exception as e:
-                self.logger.error(f"Cleanup thread error: {e}")
+                self.logger.error(f"Cleanup thread error: {str(e)}", exc_info=True)
                 time.sleep(60)  # Wait a minute before retrying
 
 class HealthMonitor:
@@ -564,7 +693,7 @@ class HealthMonitor:
                 )
 
         except Exception as e:
-            self.logger.error(f"Health check error: {e}")
+            self.logger.error(f"Health check error: {str(e)}", exc_info=True)
             self.metrics['error_count'] += 1
 
     def run(self):
@@ -574,22 +703,12 @@ class HealthMonitor:
                 self.check_system_health()
                 time.sleep(self.config['health_check_interval'])
             except Exception as e:
-                self.logger.error(f"Health monitor thread error: {e}")
+                self.logger.error(f"Health monitor thread error: {str(e)}", exc_info=True)
                 time.sleep(60)  # Wait a minute before retrying
 
 def main():
     """Main entry point with enhanced CLI options"""
     parser = argparse.ArgumentParser(description='SAI Camera Service')
-
-    # Camera configuration
-    parser.add_argument('--camera-type', choices=['usb', 'rtsp'],
-                       help='Camera type (default: from config)', default=None)
-    parser.add_argument('--camera-source',
-                       help='Camera source (USB index or RTSP URL)', default=None)
-    parser.add_argument('--resolution', type=str,
-                       help='Camera resolution in WxH format (e.g., 1280x720)', default=None)
-    parser.add_argument('--fps', type=int,
-                       help='Camera FPS (default: from config)', default=None)
 
     # Service configuration
     parser.add_argument('--config', type=str,
@@ -597,15 +716,10 @@ def main():
                        default='/etc/sai-cam/config.yaml')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Logging level (default: INFO)', default='INFO')
-    parser.add_argument('--capture-interval', type=float,
-                       help='Capture interval in seconds (default: from config)',
-                       default=None)
-
+    
     # Testing options
     parser.add_argument('--local-save', action='store_true',
                        help='Save images locally without uploading')
-    parser.add_argument('--show-preview', action='store_true',
-                       help='Show camera preview window (testing only)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Initialize camera and exit (testing only)')
 
@@ -616,26 +730,6 @@ def main():
     logger = logging.getLogger('SAICam')
 
     try:
-        # Load config file
-        with open(args.config, 'r') as f:
-            config = yaml.safe_load(f)
-
-        # Override config with command line arguments
-        if args.camera_type:
-            config['camera']['type'] = args.camera_type
-        if args.camera_source:
-            if args.camera_type == 'rtsp':
-                config['camera']['rtsp_url'] = args.camera_source
-            else:
-                config['camera']['source'] = int(args.camera_source)
-        if args.resolution:
-            w, h = map(int, args.resolution.split('x'))
-            config['camera']['resolution'] = [w, h]
-        if args.fps:
-            config['camera']['fps'] = args.fps
-        if args.capture_interval:
-            config['camera']['capture_interval'] = args.capture_interval
-
         # Initialize service
         service = CameraService(config_path=args.config)
 
@@ -643,9 +737,6 @@ def main():
         if args.dry_run:
             logger.info("Dry run completed successfully")
             return
-
-        if args.show_preview:
-            service.enable_preview()
 
         if args.local_save:
             service.disable_upload()
@@ -659,3 +750,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
