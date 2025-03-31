@@ -1,15 +1,30 @@
 camera:
+  type: 'rtsp'
+#  rtsp_url: 'rtsp://admin:UUVQNA@192.168.4.229:554/Streaming/Channels/101'
+  rtsp_url: 'rtsp://admin:Saicam1!@192.168.1.64:554/Streaming/Channels/101'
   resolution: [1280, 720]
   fps: 30
-  capture_interval: 300
+  capture_interval: 300  # 5 minutes between captures
 
 storage:
-  base_path: '/opt/camera_service/storage'
+  base_path: '/opt/sai-cam/storage'
   max_size_gb: 5
   cleanup_threshold_gb: 4.5
+  retention_days: 7  # Keep images for 7 days
+
+server:
+  url: 'https://ai.altermundi.net/pipelines/webhook/e861ad7c-8160-4964-8953-5e3a02657293'
+  ssl_verify: true
+  cert_path: '/etc/ssl/certs/ca-certificates.crt'  # Default cert path
+  timeout: 30  # 30 seconds timeout for uploads
+
+device:
+  id: 'cam001'  # Unique identifier for this camera node
+  location: 'location-name'  # Descriptive location
 
 monitoring:
-  health_check_interval: 300
+  health_check_interval: 300  # 5 minutes between health checks
   max_memory_percent: 80
   max_cpu_percent: 90
+  restart_on_failure: true
 

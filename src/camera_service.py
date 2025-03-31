@@ -23,6 +23,9 @@ from systemd import daemon
 
 VERSION = "0.0.1"
 
+# Force FFMPEG to use TCP transport for all RTSP connections
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128|pixel_format;yuv420p"
+
 class CameraService:
     def __init__(self, config_path='/etc/sai-cam/config.yaml'):
         """Initialize the camera service with all required components"""
@@ -107,22 +110,50 @@ class CameraService:
     def setup_camera(self):
         """Initialize and configure the camera"""
         try:
-            if self.config['camera']['type'] == 'rtsp':
-                self.cap = cv2.VideoCapture(self.config['camera']['rtsp_url'])
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            else:
-                self.cap = cv2.VideoCapture(0)  # USB camera
+            # Uncoment for ffmpeg debug information
+            os.environ["OPENCV_FFMPEG_DEBUG"] = "1"
 
-            resolution = self.config['camera']['resolution']
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
-            self.cap.set(cv2.CAP_PROP_FPS, self.config['camera']['fps'])
+            # Initialize the capture with FFMPEG backend
+            self.cap = cv2.VideoCapture(self.config['camera']['rtsp_url'], cv2.CAP_FFMPEG)
+
+#            if self.config['camera']['type'] == 'rtsp':
+#            self.cap = cv2.VideoCapture(self.config['camera']['rtsp_url'])
+#            self.cap = cv2.VideoCapture("rtsp://admin:UUVQNA@192.168.4.229:554/Streaming/Channels/101")
+#                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+#                self.cap.set(cv2.CAP_PROP_RTSP_TRANSPORT, 0)  # 0 for TCP (might vary by OpenCV version)
+#            else:
+#                self.cap = cv2.VideoCapture(0)  # USB camera
+
+            # Set Resolution explicit
+#            resolution = self.config['camera']['resolution']
+#            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
+#            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+            # Set fps explicit
+#            self.cap.set(cv2.CAP_PROP_FPS, self.config['camera']['fps'])
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+            # Configure for TCP transport
+#            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'H264'))
+#            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'HEVC'))
+#            self.cap.set(cv2.CAP_PROP_RTSP_TRANSPORT, 0)  # 0 = TCP
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 0)
+
+            # Set higher timeouts
+#            self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)
+#            self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000)
+            # Wait for initialization
+            time.sleep(2)
 
             if not self.cap.isOpened():
                 self.logger.error("Failed to initialize camera")
                 sys.exit(1)
 
-            self.logger.info(f"Camera initialized successfully: {resolution}")
+#            self.logger.info(f"Camera initialized successfully: {resolution}")
+            self.logger.info(f"Camera initialized successfully.")
+
+            # Initialize a variable to check interval between uploads
+            self.timestamp_last_image = time.time() - self.config['camera']['capture_interval']
+
+
         except Exception as e:
             self.logger.error(f"Camera setup error: {e}")
             sys.exit(1)
@@ -179,6 +210,13 @@ class CameraService:
         """Capture images from camera"""
         while self.running:
             try:
+              if ( time.time() - self.timestamp_last_image < self.config['camera']['capture_interval'] ):
+                # Read and discard frames
+                self.cap.grab()
+              else:
+#                # Read and discard the first several frames
+ #               for _ in range(10):
+  #                  self.cap.grab()
                 ret, frame = self.cap.read()
                 if not ret or not self.validate_image(frame):
                     self.logger.warning("Failed to capture valid frame")
@@ -216,11 +254,19 @@ class CameraService:
                 if self.upload_enabled:
                     self.upload_queue.put((filename, image_data, metadata))
 
-                time.sleep(self.config['camera']['capture_interval'])
+#                time.sleep(self.config['camera']['capture_interval'])
+                # Update variable to check interval between uploads
+                self.timestamp_last_image = time.time()
 
             except Exception as e:
                 self.logger.error(f"Capture error: {e}")
                 time.sleep(1)
+
+    def compress_image(self, image_data):
+        """Compress image data if needed"""
+        # For simple implementation, just return the data
+        # For better performance, could use PIL or other compression
+        return image_data
 
     def upload_images(self):
         """Upload images to server"""
@@ -237,8 +283,13 @@ class CameraService:
                         'metadata': ('metadata.json', json.dumps(metadata), 'application/json')
                     }
 
+                    headers = {
+                        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Im44bldlYmhvb2tBY2Nlc3MiLCJpYXQiOjE2NzY0MDI4MDAsImV4cCI6MTcwNzk2MDgwMCwiaXNzIjoibjhuQXBpIiwiYXVkIjoid2ViaG9va0NsaWVudCJ9.HKt6HB1KChxEXUusXBFrFupyxUhr0C2WW5IEfKwYZnw",
+                    }
+
                     response = requests.post(
                         self.config['server']['url'],
+                        headers=headers,
                         files=files,
                         verify=self.config['server']['ssl_verify'],
                         timeout=self.config['server']['timeout']
