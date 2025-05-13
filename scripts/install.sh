@@ -131,6 +131,11 @@ fi
 # Continue with full installation if not config-only
 echo "Starting installation..."
 
+# crear un nuevo perfil "cam2" que use DHCP como primaria y añada la IP fija como secundaria:
+## Adecuar para numero de nodo:
+sudo nmcli con add con-name "cam2" ifname eno1 type ethernet ipv4.method auto ipv4.addresses "192.168.220.10/24"
+sudo nmcli con up cam2
+
 # Create directories
 sudo mkdir -p $INSTALL_DIR/bin
 sudo mkdir -p $INSTALL_DIR/storage
