@@ -117,6 +117,7 @@ backup_existing_config
 if [ "$CONFIG_ONLY" = true ]; then
     echo "Updating configuration only..."
     sudo mkdir -p $CONFIG_DIR
+    sudo chown admin:admin $CONFIG_DIR
     sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
     sudo chmod 644 $CONFIG_DIR/config.yaml
     echo "Configuration updated successfully!"
