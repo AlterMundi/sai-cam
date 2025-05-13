@@ -65,39 +65,41 @@ check_required_files() {
 }
 
 # Function to backup existing config
+
 backup_existing_config() {
     if [ -d "$CONFIG_DIR" ]; then
         echo "Creating backup of existing configuration..."
-        sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP"
+        sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/config"
+        sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/systemd"
+        sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/logrotate"
 
         # Backup configs if they exist
         if [ -d "$CONFIG_DIR" ]; then
-            sudo cp -r "$CONFIG_DIR" "$BACKUP_DIR/$TIMESTAMP/"
-            echo "Configuration backup created at: $BACKUP_DIR/$TIMESTAMP/$(basename $CONFIG_DIR)"
+            sudo cp -r "$CONFIG_DIR"/* "$BACKUP_DIR/$TIMESTAMP/config/"
+            echo "Configuration backup created at: $BACKUP_DIR/$TIMESTAMP/config/"
         fi
 
         if [ "$CONFIG_ONLY" = false ]; then
             # Backup systemd service file if it exists
             if [ -f "/etc/systemd/system/sai-cam.service" ]; then
-                sudo cp "/etc/systemd/system/sai-cam.service" "$BACKUP_DIR/$TIMESTAMP/"
-                echo "Service file backup created at: $BACKUP_DIR/$TIMESTAMP/sai-cam.service"
+                sudo cp "/etc/systemd/system/sai-cam.service" "$BACKUP_DIR/$TIMESTAMP/systemd/"
+                echo "Service file backup created at: $BACKUP_DIR/$TIMESTAMP/systemd/sai-cam.service"
             fi
 
             # Backup systemd service file if it exists
             if [ -f "/etc/systemd/system/sai-network.service" ]; then
-                sudo cp "/etc/systemd/system/sai-network.service" "$BACKUP_DIR/$TIMESTAMP/"
-                echo "Service file backup created at: $BACKUP_DIR/$TIMESTAMP/sai-network.service"
+                sudo cp "/etc/systemd/system/sai-network.service" "$BACKUP_DIR/$TIMESTAMP/systemd/"
+                echo "Service file backup created at: $BACKUP_DIR/$TIMESTAMP/systemd/sai-network.service"
             fi
 
             # Backup logrotate config if it exists
             if [ -f "/etc/logrotate.d/sai-cam" ]; then
-                sudo cp "/etc/logrotate.d/sai-cam" "$BACKUP_DIR/$TIMESTAMP/"
-                echo "Logrotate config backup created at: $BACKUP_DIR/$TIMESTAMP/sai-cam"
+                sudo cp "/etc/logrotate.d/sai-cam" "$BACKUP_DIR/$TIMESTAMP/logrotate/"
+                echo "Logrotate config backup created at: $BACKUP_DIR/$TIMESTAMP/logrotate/sai-cam"
             fi
         fi
     fi
 }
-
 # Verify we're running as root or with sudo
 if [ "$EUID" -ne 0 ]; then
     echo "Please run this script with sudo"
