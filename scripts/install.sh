@@ -131,10 +131,10 @@ fi
 # Continue with full installation if not config-only
 echo "Starting installation..."
 
-# crear un nuevo perfil "cam2" que use DHCP como primaria y añada la IP fija como secundaria:
+# crear un nuevo perfil "saicam" que use DHCP como primaria y añada la IP fija como secundaria:
 ## Adecuar para numero de nodo:
-sudo nmcli con add con-name "cam2" ifname eno1 type ethernet ipv4.method auto ipv4.addresses "192.168.220.10/24"
-sudo nmcli con up cam2
+sudo nmcli con add con-name "saicam" ifname eth0 type ethernet ipv4.method auto ipv4.addresses "192.168.220.10/24"
+sudo nmcli con up saicam
 
 # Create directories
 sudo mkdir -p $INSTALL_DIR/bin
