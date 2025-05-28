@@ -167,22 +167,22 @@ read_config_value() {
     local default_value="$2"
     
     if [ -f "$config_file" ]; then
-        # Simple YAML parser for specific keys
+        # Simple YAML parser for specific keys - handles quotes and comments
         case $key in
             "network.node_ip")
-                grep -E "^\s*node_ip:" "$config_file" | sed 's/.*node_ip:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                grep -E "^\s*node_ip:" "$config_file" | sed 's/.*node_ip:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
             "network.interface")
-                grep -E "^\s*interface:" "$config_file" | sed 's/.*interface:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                grep -E "^\s*interface:" "$config_file" | sed 's/.*interface:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
             "network.connection_name")
-                grep -E "^\s*connection_name:" "$config_file" | sed 's/.*connection_name:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                grep -E "^\s*connection_name:" "$config_file" | sed 's/.*connection_name:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
             "system.user")
-                grep -E "^\s*user:" "$config_file" | sed 's/.*user:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                grep -E "^\s*user:" "$config_file" | sed 's/.*user:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
             "system.group")
-                grep -E "^\s*group:" "$config_file" | sed 's/.*group:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                grep -E "^\s*group:" "$config_file" | sed 's/.*group:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
             *)
                 echo "$default_value"
