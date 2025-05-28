@@ -5,6 +5,13 @@ cameras:
     resolution: [1280, 720]
     fps: 30
     capture_interval: 300
+  - id: 'camera2'
+    type: 'onvif'
+    address: '192.168.220.74'
+    port: 8000
+    username: 'admin'
+    password: 'Saicam1!'
+    capture_interval: 300
 
 storage:
   base_path: '/opt/sai-cam/storage'
