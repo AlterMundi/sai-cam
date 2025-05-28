@@ -53,7 +53,7 @@ Full Installation (-c flag NOT used):
 
     3. Service Installation:
        - Copies camera service and configuration files
-       - Installs systemd services (sai-cam, sai-network)
+       - Installs systemd service (sai-cam)
        - Configures Nginx proxy for camera access
        - Sets up log rotation
 
@@ -91,7 +91,6 @@ FILES CREATED/MODIFIED:
     /etc/sai-cam/config.yaml   # Service configuration
     /var/log/sai-cam/          # Log files
     /etc/systemd/system/sai-cam.service
-    /etc/systemd/system/sai-network.service
     /etc/nginx/sites-available/camera-proxy
     /etc/logrotate.d/sai-cam
 
@@ -214,7 +213,6 @@ check_required_files() {
             "$PROJECT_ROOT/config/config.yaml"
             "$PROJECT_ROOT/config/camera-proxy"
             "$PROJECT_ROOT/systemd/sai-cam.service"
-            "$PROJECT_ROOT/systemd/sai-network.service"
             "$PROJECT_ROOT/systemd/logrotate.conf"
             "$PROJECT_ROOT/requirements.txt"
         )
@@ -263,11 +261,6 @@ backup_existing_config() {
                 echo "✅ Service file backup created: sai-cam.service"
             fi
 
-            # Backup systemd service file if it exists
-            if [ -f "/etc/systemd/system/sai-network.service" ]; then
-                sudo cp "/etc/systemd/system/sai-network.service" "$BACKUP_DIR/$TIMESTAMP/systemd/"
-                echo "✅ Service file backup created: sai-network.service"
-            fi
 
             # Backup logrotate config if it exists
             if [ -f "/etc/logrotate.d/sai-cam" ]; then
@@ -403,9 +396,8 @@ sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
 echo "🌐 Installing Nginx proxy configuration..."
 sudo cp $PROJECT_ROOT/config/camera-proxy /etc/nginx/sites-available/
 
-echo "🔧 Installing systemd services..."
+echo "🔧 Installing systemd service..."
 sudo cp $PROJECT_ROOT/systemd/sai-cam.service /etc/systemd/system/sai-cam.service
-sudo cp $PROJECT_ROOT/systemd/sai-network.service /etc/systemd/system/sai-network.service
 
 echo "📝 Installing log rotation configuration..."
 sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
@@ -421,7 +413,6 @@ sudo chown -R $SYSTEM_USER:$SYSTEM_GROUP $LOG_DIR
 sudo chmod 644 $CONFIG_DIR/config.yaml
 sudo chmod 644 /etc/nginx/sites-available/camera-proxy
 sudo chmod 644 /etc/systemd/system/sai-cam.service
-sudo chmod 644 /etc/systemd/system/sai-network.service
 sudo chmod 644 /etc/logrotate.d/sai-cam
 sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
 echo "✅ Permissions configured successfully"
@@ -449,16 +440,6 @@ echo "🚀 Starting SAI-CAM Services"
 echo "----------------------------"
 echo "🔄 Reloading systemd daemon..."
 sudo systemctl daemon-reload
-
-echo "⚙️  Enabling sai-network service..."
-sudo systemctl enable sai-network
-
-echo "🔌 Starting sai-network service..."
-if sudo systemctl start sai-network; then
-    echo "✅ sai-network service started successfully"
-else
-    echo "⚠️  sai-network service failed to start (this may be normal)"
-fi
 
 echo "⚙️  Enabling sai-cam service..."
 sudo systemctl enable sai-cam

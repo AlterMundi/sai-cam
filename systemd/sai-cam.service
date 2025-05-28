@@ -1,7 +1,6 @@
 [Unit]
 Description=SAI Camera Service
 After=network.target
-Requires=sai-network.service
 StartLimitIntervalSec=0
 
 [Service]
