@@ -66,12 +66,13 @@ cameras:
 #    fps: 30
 
 # ONVIF Camera:
-#  - id: 'cam_onvif'
+#  - id: 'camera2'
 #    type: 'onvif'
-#    ip: '192.168.220.105'
+#    address: '192.168.220.74'
 #    username: 'admin'
-#    password: 'password'
-#    port: 80
+#    password: 'Saicam1!'
+#    port: 8000
+#    capture_interval: 300
 
 storage:
   base_path: '/opt/sai-cam/storage'
