@@ -1,0 +1,108 @@
+# SAI-Cam Node Configuration
+# Configure this file according to your specific node deployment
+
+# Network configuration for the node
+network:
+  node_ip: '192.168.220.10/24'  # Fixed IP for this node
+  interface: 'eth0'             # Network interface
+  connection_name: 'saicam'     # NetworkManager connection name
+  dhcp_primary: true            # Use DHCP as primary, fixed IP as secondary
+
+# System user configuration
+system:
+  user: 'admin'                 # System user for services
+  group: 'admin'                # System group
+
+# Device identification
+device:
+  id: 'sai-cam-node-01'        # Unique node identifier
+  location: 'location-name'     # Deployment location
+  description: 'SAI-Cam Edge Node'
+
+# Camera configuration - supports up to 4 cameras
+cameras:
+  - id: 'cam1'
+    type: 'rtsp'               # Options: rtsp, usb, onvif
+    ip: '192.168.220.101'      # Camera IP address
+    rtsp_url: 'rtsp://admin:password@192.168.220.101:554/Streaming/Channels/101'
+    resolution: [1920, 1080]
+    fps: 30
+    capture_interval: 300
+    position: 'north'          # Physical position/orientation
+    
+  - id: 'cam2'
+    type: 'rtsp'
+    ip: '192.168.220.102'
+    rtsp_url: 'rtsp://admin:password@192.168.220.102:554/Streaming/Channels/101'
+    resolution: [1920, 1080]
+    fps: 30
+    capture_interval: 300
+    position: 'east'
+    
+  - id: 'cam3'
+    type: 'rtsp'
+    ip: '192.168.220.103'
+    rtsp_url: 'rtsp://admin:password@192.168.220.103:554/Streaming/Channels/101'
+    resolution: [1920, 1080]
+    fps: 30
+    capture_interval: 300
+    position: 'south'
+    
+  - id: 'cam4'
+    type: 'rtsp'
+    ip: '192.168.220.104'
+    rtsp_url: 'rtsp://admin:password@192.168.220.104:554/Streaming/Channels/101'
+    resolution: [1920, 1080]
+    fps: 30
+    capture_interval: 300
+    position: 'west'
+
+# Alternative camera types examples:
+# USB Camera:
+#  - id: 'cam_usb'
+#    type: 'usb'
+#    device_path: '/dev/video0'
+#    resolution: [1280, 720]
+#    fps: 30
+
+# ONVIF Camera:
+#  - id: 'cam_onvif'
+#    type: 'onvif'
+#    ip: '192.168.220.105'
+#    username: 'admin'
+#    password: 'password'
+#    port: 80
+
+storage:
+  base_path: '/opt/sai-cam/storage'
+  max_size_gb: 5
+  cleanup_threshold_gb: 4.5
+  retention_days: 7
+
+server:
+  url: 'https://your-server.com/webhook/endpoint'
+  ssl_verify: true
+  cert_path: '/etc/ssl/certs/ca-certificates.crt'
+  timeout: 30
+  auth_token: 'your_auth_token_here'
+
+monitoring:
+  health_check_interval: 300
+  max_memory_percent: 80
+  max_cpu_percent: 90
+  restart_on_failure: true
+
+logging:
+  level: 'INFO'
+  log_dir: '/var/log/sai-cam'
+  log_file: 'camera_service.log'
+  max_size_bytes: 10485760
+  backup_count: 5
+
+advanced:
+  ffmpeg_debug: false
+  ffmpeg_options: 'rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128|pixel_format;yuv420p'
+  camera_init_wait: 2
+  polling_interval: 0.1
+  reconnect_attempts: 3
+  reconnect_delay: 5

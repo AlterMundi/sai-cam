@@ -19,16 +19,68 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Define variables
+# Internal variables for system maintenance (not user-configurable)
 INSTALL_DIR="/opt/sai-cam"
 CONFIG_DIR="/etc/sai-cam"
 LOG_DIR="/var/log/sai-cam"
 BACKUP_DIR="/var/backups/sai-cam"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+# System packages required for installation
+SYSTEM_PACKAGES="python3-pip python3-opencv python3-venv libsystemd-dev nginx"
+
+# Default system user (can be overridden by config.yaml)
+DEFAULT_USER="admin"
+DEFAULT_GROUP="admin"
+
+# Network configuration defaults (can be overridden by config.yaml)
+DEFAULT_NODE_IP="192.168.220.10/24"
+DEFAULT_INTERFACE="eth0"
+DEFAULT_CONNECTION_NAME="saicam"
+
 # Get the directory where the script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+
+# Function to read YAML configuration values
+read_config_value() {
+    local key="$1"
+    local config_file="$PROJECT_ROOT/config/config.yaml"
+    local default_value="$2"
+    
+    if [ -f "$config_file" ]; then
+        # Simple YAML parser for specific keys
+        case $key in
+            "network.node_ip")
+                grep -E "^\s*node_ip:" "$config_file" | sed 's/.*node_ip:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                ;;
+            "network.interface")
+                grep -E "^\s*interface:" "$config_file" | sed 's/.*interface:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                ;;
+            "network.connection_name")
+                grep -E "^\s*connection_name:" "$config_file" | sed 's/.*connection_name:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                ;;
+            "system.user")
+                grep -E "^\s*user:" "$config_file" | sed 's/.*user:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                ;;
+            "system.group")
+                grep -E "^\s*group:" "$config_file" | sed 's/.*group:\s*['\''\"]*\([^'\''\"]*\)['\''\"]*$/\1/' | tr -d ' '
+                ;;
+            *)
+                echo "$default_value"
+                ;;
+        esac
+    else
+        echo "$default_value"
+    fi
+}
+
+# Load configuration values
+NODE_IP=$(read_config_value "network.node_ip" "$DEFAULT_NODE_IP")
+INTERFACE=$(read_config_value "network.interface" "$DEFAULT_INTERFACE")
+CONNECTION_NAME=$(read_config_value "network.connection_name" "$DEFAULT_CONNECTION_NAME")
+SYSTEM_USER=$(read_config_value "system.user" "$DEFAULT_USER")
+SYSTEM_GROUP=$(read_config_value "system.group" "$DEFAULT_GROUP")
 
 # Function to check if required files exist
 check_required_files() {
@@ -117,7 +169,7 @@ backup_existing_config
 if [ "$CONFIG_ONLY" = true ]; then
     echo "Updating configuration only..."
     sudo mkdir -p $CONFIG_DIR
-    sudo chown admin:admin $CONFIG_DIR
+    sudo chown $SYSTEM_USER:$SYSTEM_GROUP $CONFIG_DIR
     sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
     sudo chmod 644 $CONFIG_DIR/config.yaml
     echo "Configuration updated successfully!"
@@ -132,9 +184,10 @@ fi
 echo "Starting installation..."
 
 # crear un nuevo perfil "saicam" que use DHCP como primaria y añada la IP fija como secundaria:
-## Adecuar para numero de nodo:
-sudo nmcli con add con-name "saicam" ifname eth0 type ethernet ipv4.method auto ipv4.addresses "192.168.220.10/24"
-sudo nmcli con up saicam
+## Network configuration from config.yaml:
+echo "Configuring network: $CONNECTION_NAME on $INTERFACE with IP $NODE_IP"
+sudo nmcli con add con-name "$CONNECTION_NAME" ifname $INTERFACE type ethernet ipv4.method auto ipv4.addresses "$NODE_IP"
+sudo nmcli con up $CONNECTION_NAME
 
 # Create directories
 sudo mkdir -p $INSTALL_DIR/bin
@@ -145,7 +198,7 @@ sudo mkdir -p $LOG_DIR
 # Install system dependencies
 echo "Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-opencv python3-venv libsystemd-dev nginx
+sudo apt-get install -y $SYSTEM_PACKAGES
 
 # Set up virtual environment
 echo "Setting up Python virtual environment..."
@@ -164,8 +217,8 @@ sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
 
 # Set permissions
 echo "Setting file permissions..."
-sudo chown -R admin:admin $INSTALL_DIR
-sudo chown -R admin:admin $LOG_DIR
+sudo chown -R $SYSTEM_USER:$SYSTEM_GROUP $INSTALL_DIR
+sudo chown -R $SYSTEM_USER:$SYSTEM_GROUP $LOG_DIR
 sudo chmod 644 $CONFIG_DIR/config.yaml
 sudo chmod 644 /etc/nginx/sites-available/camera-proxy
 sudo chmod 644 /etc/systemd/system/sai-cam.service
