@@ -192,3 +192,4 @@ test_output/
 # Deployment scripts with embedded credentials
 scripts/*deploy*
 scripts/*prod*
+config/config.yaml

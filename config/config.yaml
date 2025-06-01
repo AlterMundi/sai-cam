@@ -15,8 +15,8 @@ system:
 
 # Device identification
 device:
-  id: 'sai-cam-node-01'        # Unique node identifier
-  location: 'location-name'     # Deployment location
+  id: 'sai-cam-node-07'        # Unique node identifier
+  location: 'Molinari'     # Deployment location
   description: 'SAI-Cam Edge Node'
 
 # Camera configuration - 4 ONVIF cameras
@@ -57,6 +57,24 @@ cameras:
     capture_interval: 300
     position: 'west'
 
+# source="""rtsp://admin:Saicam1!@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0""",  ## DAHUA
+  - id: 'cam5'
+    type: 'rtsp'
+    rtsp_url: 'rtsp://admin:Saicam1!@192.168.220.10:554/cam/realmonitor?channel=1&subtype=0'
+    address: '192.168.220.10'
+    port: 554
+    username: 'admin'
+    password: 'Saicam1!'
+    capture_interval: 300
+    position: 'west'
+
+  - id: 'cam6'
+    type: 'usb'
+    device_index: 0
+    # device_path: /dev/video0
+    capture_interval: 300
+    position: 'west'
+
 storage:
   base_path: '/opt/sai-cam/storage'
   max_size_gb: 5
@@ -64,11 +82,11 @@ storage:
   retention_days: 7
 
 server:
-  url: 'https://your-server.com/webhook/endpoint'
+  url: 'https://ai.altermundi.net/pipelines/webhook/e861ad7c-8160-4964-8953-5e3a02657293'
   ssl_verify: true
   cert_path: '/etc/ssl/certs/ca-certificates.crt'
   timeout: 30
-  auth_token: 'your_auth_token_here'
+  auth_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Im44bldlYmhvb2tBY2Nlc3MiLCJpYXQiOjE2NzY0MDI4MDAsImV4cCI6MTcwNzk2MDgwMCwiaXNzIjoibjhuQXBpIiwiYXVkIjoid2ViaG9va0NsaWVudCJ9.HKt6HB1KChxEXUusXBFrFupyxUhr0C2WW5IEfKwYZnw'
 
 monitoring:
   health_check_interval: 300
