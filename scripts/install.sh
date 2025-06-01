@@ -472,11 +472,23 @@ echo "⚙️  Enabling sai-cam service..."
 sudo systemctl enable sai-cam
 
 echo "📹 Starting sai-cam service..."
-if sudo systemctl start sai-cam; then
-    echo "✅ sai-cam service started successfully"
+# Check if service is already running and restart it to apply new code
+if systemctl is-active --quiet sai-cam; then
+    echo "🔄 Service is running, restarting to apply updates..."
+    if sudo systemctl restart sai-cam; then
+        echo "✅ sai-cam service restarted successfully"
+    else
+        echo "❌ sai-cam service failed to restart"
+        echo "   Check logs: sudo journalctl -u sai-cam -n 20"
+    fi
 else
-    echo "❌ sai-cam service failed to start"
-    echo "   Check logs: sudo journalctl -u sai-cam -n 20"
+    # Service not running, start it fresh
+    if sudo systemctl start sai-cam; then
+        echo "✅ sai-cam service started successfully"
+    else
+        echo "❌ sai-cam service failed to start"
+        echo "   Check logs: sudo journalctl -u sai-cam -n 20"
+    fi
 fi
 
 echo ""

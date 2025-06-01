@@ -139,3 +139,7 @@ The service uses `/etc/sai-cam/config.yaml` for configuration. Key sections:
 - Automatic camera reconnection with configurable retry attempts
 - Image validation prevents storing corrupted or invalid frames
 - Storage manager handles cleanup based on disk usage and retention policies
+
+## Deployment Considerations
+
+- **Installation Script**: Always take into account that `install.sh` is used to deploy changes when proposing solutions or making modifications to the project
