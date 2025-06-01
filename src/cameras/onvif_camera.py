@@ -44,25 +44,25 @@ class ONVIFCameraImpl(BaseCamera):
             sys.path.insert(0, parent_dir)
         
         from config_helper import ConfigHelper
-        config_helper = ConfigHelper(logger)
+        self.config_helper = ConfigHelper(logger)
         
-        self.address = config_helper.get_secure_value(
+        self.address = self.config_helper.get_secure_value(
             'CAMERA_IP', 
             camera_config.get('address'),
             required=True,
             description=f"IP address for ONVIF camera {camera_id}"
         )
-        self.port = int(config_helper.get_secure_value(
+        self.port = int(self.config_helper.get_secure_value(
             'CAMERA_PORT',
             camera_config.get('port'),
             default=8000
         ))
-        self.username = config_helper.get_secure_value(
+        self.username = self.config_helper.get_secure_value(
             'CAMERA_USERNAME',
             camera_config.get('username'),
             default='admin'
         )
-        self.password = config_helper.get_secure_value(
+        self.password = self.config_helper.get_secure_value(
             'CAMERA_PASSWORD',
             camera_config.get('password'),
             required=True,
@@ -86,7 +86,7 @@ class ONVIFCameraImpl(BaseCamera):
             from pathlib import Path
             
             # Allow WSDL path to be configured via environment variable or config
-            wsdl_path = config_helper.get_secure_value(
+            wsdl_path = self.config_helper.get_secure_value(
                 'ONVIF_WSDL_PATH',
                 camera_config.get('wsdl_path'),
                 description=f"ONVIF WSDL path for camera {camera_id}"
