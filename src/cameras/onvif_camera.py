@@ -72,13 +72,61 @@ class ONVIFCameraImpl(BaseCamera):
         try:
             self.logger.info(f"Camera {self.camera_id}: Initializing ONVIF camera at {self.address}:{self.port}")
             
-            # Initialize ONVIF camera connection
-            self.onvif_camera = ONVIFCamera(
-                self.address,
-                self.port,
-                self.username,
-                self.password
+            # Initialize ONVIF camera connection with WSDL path
+            # Detect correct WSDL path based on Python version and environment
+            import sys
+            import os
+            from pathlib import Path
+            
+            # Allow WSDL path to be configured via environment variable or config
+            wsdl_path = config_helper.get_secure_value(
+                'ONVIF_WSDL_PATH',
+                camera_config.get('wsdl_path'),
+                description=f"ONVIF WSDL path for camera {camera_id}"
             )
+            
+            if not wsdl_path:
+                # Auto-detect WSDL path
+                potential_paths = [
+                    f'/opt/sai-cam/venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages/wsdl/',
+                    '/opt/sai-cam/venv/lib/python3.4/site-packages/wsdl/',  # Legacy path from working script
+                    f'/opt/sai-cam/venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages/onvif/wsdl/',
+                    # Additional common paths
+                    '/usr/local/lib/python3*/site-packages/wsdl/',
+                    './venv/lib/python3*/site-packages/wsdl/',
+                ]
+                
+                # Find the first existing WSDL path
+                for path in potential_paths:
+                    # Handle glob patterns
+                    if '*' in path:
+                        import glob
+                        matches = glob.glob(path)
+                        if matches:
+                            path = matches[0]
+                    
+                    if os.path.exists(path):
+                        wsdl_path = path
+                        self.logger.debug(f"Camera {self.camera_id}: Auto-detected WSDL path: {wsdl_path}")
+                        break
+            
+            if wsdl_path:
+                self.onvif_camera = ONVIFCamera(
+                    self.address,
+                    self.port,
+                    self.username,
+                    self.password,
+                    wsdl_path
+                )
+            else:
+                # Fallback without WSDL path (may fail)
+                self.logger.warning(f"Camera {self.camera_id}: WSDL path not found, trying without explicit path")
+                self.onvif_camera = ONVIFCamera(
+                    self.address,
+                    self.port,
+                    self.username,
+                    self.password
+                )
             
             # Test basic connectivity
             try:
