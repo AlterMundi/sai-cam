@@ -1,0 +1,8 @@
+# Minimal requirements for testing architecture without camera hardware
+PyYAML>=6.0          # For config file handling
+numpy>=1.24.0        # For basic array operations
+requests>=2.28.0     # For HTTP operations
+
+# Optional: Add these when ready to test with real cameras
+# opencv-python>=4.8.0 # For camera operations
+# onvif-zeep>=0.2.12   # For ONVIF camera support
