@@ -95,10 +95,14 @@ class BaseCamera(ABC):
             
         # Check for completely black or white frames
         avg_value = np.mean(frame)
-        if avg_value < 5 or avg_value > 250:
-            self.logger.warning(f"Camera {self.camera_id}: Invalid frame detected (avg={avg_value:.1f})")
-            return False
-            
+        
+        # Log warnings for low/high brightness but don't reject frames
+        if avg_value < 5:
+            self.logger.warning(f"Camera {self.camera_id}: Low brightness frame detected (avg={avg_value:.1f}) - possible low light conditions")
+        elif avg_value > 250:
+            self.logger.warning(f"Camera {self.camera_id}: High brightness frame detected (avg={avg_value:.1f}) - possible overexposure")
+        
+        # Only reject completely empty or corrupted frames
         return True
     
     def get_capture_interval(self) -> int:
