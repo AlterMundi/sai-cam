@@ -88,8 +88,8 @@ class ONVIFCameraImpl(BaseCamera):
             # Allow WSDL path to be configured via environment variable or config
             wsdl_path = self.config_helper.get_secure_value(
                 'ONVIF_WSDL_PATH',
-                camera_config.get('wsdl_path'),
-                description=f"ONVIF WSDL path for camera {camera_id}"
+                self.config.get('wsdl_path'),
+                description=f"ONVIF WSDL path for camera {self.camera_id}"
             )
             
             if not wsdl_path:
