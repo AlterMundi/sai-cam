@@ -387,8 +387,25 @@ echo "✅ Python environment configured successfully"
 echo ""
 echo "📋 Installing Service Files"
 echo "---------------------------"
-echo "📄 Copying camera service..."
+echo "📄 Copying camera service and modules..."
+# Copy main camera service
 sudo cp $PROJECT_ROOT/src/camera_service.py $INSTALL_DIR/bin/
+
+# Copy new modular camera architecture
+echo "📦 Installing camera modules..."
+sudo cp -r $PROJECT_ROOT/src/cameras $INSTALL_DIR/
+sudo cp $PROJECT_ROOT/src/config_helper.py $INSTALL_DIR/
+
+# Copy environment configuration if it exists
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    echo "🔐 Installing environment configuration..."
+    sudo cp $PROJECT_ROOT/.env $INSTALL_DIR/
+    sudo chmod 600 $INSTALL_DIR/.env
+    sudo chown $SYSTEM_USER:$SYSTEM_GROUP $INSTALL_DIR/.env
+else
+    echo "📋 Creating .env template..."
+    sudo cp $PROJECT_ROOT/.env.example $INSTALL_DIR/.env.example
+fi
 
 echo "⚙️  Copying configuration..."
 sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
@@ -415,6 +432,16 @@ sudo chmod 644 /etc/nginx/sites-available/camera-proxy
 sudo chmod 644 /etc/systemd/system/sai-cam.service
 sudo chmod 644 /etc/logrotate.d/sai-cam
 sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
+
+# Set permissions for new camera modules
+sudo find $INSTALL_DIR/cameras -name "*.py" -exec chmod 644 {} \;
+sudo chmod 644 $INSTALL_DIR/config_helper.py
+
+# Secure environment file if it exists
+if [ -f "$INSTALL_DIR/.env" ]; then
+    sudo chmod 600 $INSTALL_DIR/.env
+fi
+
 echo "✅ Permissions configured successfully"
 
 # Setup Camera Proxy

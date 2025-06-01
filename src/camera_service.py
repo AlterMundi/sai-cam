@@ -23,8 +23,7 @@ from systemd import daemon
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import numpy as np
-from onvif import ONVIFCamera
-from requests.auth import HTTPDigestAuth
+# ONVIF and HTTP auth now handled by camera modules
 
 VERSION = "0.1.0"  # Version bump for multi-camera support
 
@@ -41,125 +40,25 @@ class CameraInstance:
         self.logger = logger
         self.storage_manager = storage_manager
         self.upload_queue = upload_queue
-        self.cap = None
         self.running = True
         self.timestamp_last_image = time.time() - self.config.get('capture_interval', 300)
-        self.lock = Lock()
+        
+        # Import and create camera using new architecture
+        from cameras import create_camera_from_config
+        self.camera = create_camera_from_config(camera_config, global_config, logger)
         self.camera_type = camera_config.get('type', 'rtsp')
-        self.onvif_cam = None
-        self.snapshot_uri = None
         
     def setup_camera(self):
-        """Initialize this specific camera"""
+        """Initialize this specific camera using new architecture"""
         try:
-            if self.camera_type == 'onvif':
-                return self.setup_onvif_camera()
-            else:
-                return self.setup_rtsp_camera()
-                
+            return self.camera.setup()
         except Exception as e:
             self.logger.error(f"Camera {self.camera_id}: Setup error: {str(e)}", exc_info=True)
             return False
     
-    def setup_rtsp_camera(self):
-        """Initialize RTSP camera"""
-        self.logger.info(f"Camera {self.camera_id}: Initializing RTSP with URL: {self.config['rtsp_url']}")
-        
-        with self.lock:
-            # Initialize the capture with FFMPEG backend
-            self.cap = cv2.VideoCapture(self.config['rtsp_url'], cv2.CAP_FFMPEG)
-            
-            # Set camera properties
-            if 'fps' in self.config:
-                self.cap.set(cv2.CAP_PROP_FPS, self.config['fps'])
-                self.logger.debug(f"Camera {self.camera_id}: FPS set to {self.config['fps']}")
-                
-            if 'resolution' in self.config and len(self.config['resolution']) == 2:
-                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config['resolution'][0])
-                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config['resolution'][1])
-                self.logger.debug(f"Camera {self.camera_id}: Resolution set to {self.config['resolution'][0]}x{self.config['resolution'][1]}")
-            
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 0)
-            
-            # Wait for initialization
-            init_wait = self.global_config.get('advanced', {}).get('camera_init_wait', 2)
-            time.sleep(init_wait)
-            
-            if not self.cap.isOpened():
-                self.logger.error(f"Camera {self.camera_id}: Failed to initialize at {self.config['rtsp_url']}")
-                return False
-            
-            # Get actual camera properties
-            actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
-            self.logger.info(f"Camera {self.camera_id}: RTSP initialized successfully: {actual_width}x{actual_height} @ {actual_fps:.1f}fps")
-            
-        return True
     
-    def setup_onvif_camera(self):
-        """Initialize ONVIF camera"""
-        self.logger.info(f"Camera {self.camera_id}: Initializing ONVIF camera at {self.config['address']}:{self.config.get('port', 8000)}")
-        
-        try:
-            # Initialize ONVIF camera connection
-            self.onvif_cam = ONVIFCamera(
-                self.config['address'], 
-                self.config.get('port', 8000),
-                self.config.get('username', 'admin'),
-                self.config.get('password', 'Saicam1!')
-            )
-            
-            # Get media service
-            media_service = self.onvif_cam.create_media_service()
-            
-            # Get available profiles
-            profiles = media_service.GetProfiles()
-            if not profiles:
-                self.logger.error(f"Camera {self.camera_id}: No ONVIF profiles found")
-                return False
-            
-            # Use the first available profile
-            profile = profiles[0]
-            self.logger.info(f"Camera {self.camera_id}: Using ONVIF profile: {profile.Name}")
-            
-            # Get snapshot URI
-            snapshot_uri = media_service.GetSnapshotUri({'ProfileToken': profile.token})
-            self.snapshot_uri = snapshot_uri.Uri
-            self.logger.info(f"Camera {self.camera_id}: ONVIF snapshot URI: {self.snapshot_uri}")
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Camera {self.camera_id}: ONVIF setup error: {str(e)}", exc_info=True)
-            return False
     
-    def validate_image(self, frame):
-        """Validate the image from this camera"""
-        if frame is None or frame.size == 0:
-            return False
-        # Check for completely black or white frames
-        avg_value = cv2.mean(frame)[0]
-        if avg_value < 5 or avg_value > 250:
-            return False
-        return True
     
-    def reconnect_camera(self):
-        """Reconnect this specific camera"""
-        self.logger.warning(f"Camera {self.camera_id}: Attempting reconnection")
-        
-        if self.camera_type == 'rtsp':
-            with self.lock:
-                if self.cap is not None:
-                    self.cap.release()
-                    self.cap = None
-        else:  # ONVIF
-            self.onvif_cam = None
-            self.snapshot_uri = None
-        
-        reconnect_delay = self.global_config.get('advanced', {}).get('reconnect_delay', 5)
-        time.sleep(reconnect_delay)
-        return self.setup_camera()
         
     def capture_images(self):
         """Capture images from this specific camera"""
@@ -171,22 +70,19 @@ class CameraInstance:
                 interval = self.config.get('capture_interval', 300)
                 
                 if current_time - self.timestamp_last_image < interval:
-                    if self.camera_type == 'rtsp':
-                        # Read and discard frames for RTSP cameras
-                        with self.lock:
-                            if self.cap and self.cap.isOpened():
-                                self.cap.grab()
+                    # For RTSP cameras, grab frames to keep stream alive
+                    if self.camera_type == 'rtsp' and hasattr(self.camera, 'grab_frame'):
+                        self.camera.grab_frame()
                     time.sleep(polling_interval)
                     continue
                 
-                if self.camera_type == 'onvif':
-                    frame = self.capture_onvif_snapshot()
-                else:
-                    frame = self.capture_rtsp_frame()
+                # Capture frame using new unified interface
+                frame = self.camera.capture_frame()
                 
-                if frame is None or not self.validate_image(frame):
+                if frame is None or not self.camera.validate_frame(frame):
                     self.logger.warning(f"Camera {self.camera_id}: Failed to capture valid frame")
-                    self.reconnect_camera()
+                    if not self.camera.reconnect():
+                        self.logger.error(f"Camera {self.camera_id}: Reconnection failed")
                     time.sleep(1)
                     continue
                 
@@ -227,63 +123,14 @@ class CameraInstance:
                 self.logger.error(f"Camera {self.camera_id}: Capture error: {str(e)}", exc_info=True)
                 time.sleep(1)
     
-    def capture_rtsp_frame(self):
-        """Capture frame from RTSP camera"""
-        with self.lock:
-            if not self.cap or not self.cap.isOpened():
-                if not self.reconnect_camera():
-                    return None
-            
-            self.logger.debug(f"Camera {self.camera_id}: Capturing new RTSP frame")
-            ret, frame = self.cap.read()
-            
-            if not ret:
-                return None
-            return frame
-    
-    def capture_onvif_snapshot(self):
-        """Capture snapshot from ONVIF camera"""
-        try:
-            if not self.snapshot_uri:
-                self.logger.error(f"Camera {self.camera_id}: No ONVIF snapshot URI available")
-                return None
-            
-            self.logger.debug(f"Camera {self.camera_id}: Downloading ONVIF snapshot")
-            response = requests.get(
-                self.snapshot_uri, 
-                auth=HTTPDigestAuth(
-                    self.config.get('username', 'admin'),
-                    self.config.get('password', 'Saicam1!')
-                ),
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                # Convert image bytes to OpenCV format
-                nparr = np.frombuffer(response.content, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                return frame
-            else:
-                self.logger.error(f"Camera {self.camera_id}: ONVIF snapshot failed: HTTP {response.status_code}")
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"Camera {self.camera_id}: ONVIF capture error: {str(e)}", exc_info=True)
-            return None
     
     def stop(self):
-        """Stop this camera instance"""
+        """Stop this camera instance using new architecture"""
         self.running = False
         
-        if self.camera_type == 'rtsp':
-            with self.lock:
-                if self.cap is not None:
-                    self.cap.release()
-                    self.cap = None
-        else:  # ONVIF
-            self.onvif_cam = None
-            self.snapshot_uri = None
-            
+        # Use new camera cleanup method
+        self.camera.cleanup()
+        
         self.logger.info(f"Camera {self.camera_id}: Stopped")
 
 class CameraService:
