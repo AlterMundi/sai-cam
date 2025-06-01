@@ -44,6 +44,17 @@ class CameraInstance:
         self.timestamp_last_image = time.time() - self.config.get('capture_interval', 300)
         
         # Import and create camera using new architecture
+        import sys
+        import os
+        # Add current directory to path to find cameras module in deployed environment
+        current_dir = os.path.dirname(__file__)
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        # Add parent directory as well for when running from bin/ subdirectory
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+            
         from cameras import create_camera_from_config
         self.camera = create_camera_from_config(camera_config, global_config, logger)
         self.camera_type = camera_config.get('type', 'rtsp')

@@ -36,7 +36,14 @@ class ONVIFCameraImpl(BaseCamera):
         
         # ONVIF-specific configuration
         # Use environment variables with config file fallback
-        from ..config_helper import ConfigHelper
+        import sys
+        import os
+        # Add parent directory to path to find config_helper in deployed environment
+        parent_dir = os.path.dirname(os.path.dirname(__file__))
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        
+        from config_helper import ConfigHelper
         config_helper = ConfigHelper(logger)
         
         self.address = config_helper.get_secure_value(
