@@ -75,7 +75,7 @@ CONFIGURATION:
       interface: 'eth0'
       connection_name: 'saicam'
 
-    cameras:           # Required - define your cameras
+    cameras:           # Required - define your cameras (up to 20 supported)
       - id: 'cam1'
         type: 'rtsp'   # or 'onvif'
         ...
@@ -189,6 +189,82 @@ read_config_value() {
         esac
     else
         echo "$default_value"
+    fi
+}
+
+# Function to generate camera proxy configuration
+generate_camera_proxy_config() {
+    local config_file="$PROJECT_ROOT/config/config.yaml"
+    local proxy_file="/tmp/camera-proxy-generated"
+    local port=8080
+    
+    echo "🔧 Generating camera proxy configuration from config.yaml..."
+    
+    # Start with empty config
+    > "$proxy_file"
+    
+    if [ -f "$config_file" ]; then
+        # Extract camera IPs from config.yaml
+        # Look for cameras section and extract IP addresses
+        local in_cameras=false
+        local camera_count=0
+        
+        while IFS= read -r line; do
+            # Check if we're entering cameras section
+            if [[ "$line" =~ ^cameras: ]]; then
+                in_cameras=true
+                continue
+            fi
+            
+            # Check if we're leaving cameras section (new top-level key)
+            if [[ "$in_cameras" == true && "$line" =~ ^[a-zA-Z] ]]; then
+                in_cameras=false
+                break
+            fi
+            
+            # Extract IP addresses from camera entries
+            if [[ "$in_cameras" == true && "$line" =~ ip:.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                local camera_ip=$(echo "$line" | sed 's/.*ip:\s*['\''\"]*\([0-9.]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//')
+                
+                if [[ -n "$camera_ip" && "$camera_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    echo "📹 Found camera IP: $camera_ip -> proxy port $port"
+                    
+                    # Generate nginx server block for this camera
+                    cat >> "$proxy_file" << EOF
+server {
+    listen $port;
+    location / {
+        proxy_pass http://$camera_ip:80;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+    }
+}
+
+EOF
+                    
+                    port=$((port + 1))
+                    camera_count=$((camera_count + 1))
+                fi
+            fi
+        done < "$config_file"
+        
+        if [ $camera_count -gt 0 ]; then
+            echo "✅ Generated proxy configuration for $camera_count cameras (ports 8080-$((port-1)))"
+            # Copy generated config to destination
+            sudo cp "$proxy_file" "/etc/nginx/sites-available/camera-proxy"
+            rm -f "$proxy_file"
+        else
+            echo "⚠️  No camera IPs found in config.yaml, using static proxy configuration"
+            sudo cp "$PROJECT_ROOT/config/camera-proxy" "/etc/nginx/sites-available/camera-proxy"
+        fi
+    else
+        echo "⚠️  Config file not found, using static proxy configuration"
+        sudo cp "$PROJECT_ROOT/config/camera-proxy" "/etc/nginx/sites-available/camera-proxy"
     fi
 }
 
@@ -411,7 +487,7 @@ echo "⚙️  Copying configuration..."
 sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
 
 echo "🌐 Installing Nginx proxy configuration..."
-sudo cp $PROJECT_ROOT/config/camera-proxy /etc/nginx/sites-available/
+generate_camera_proxy_config
 
 echo "🔧 Installing systemd service..."
 sudo cp $PROJECT_ROOT/systemd/sai-cam.service /etc/systemd/system/sai-cam.service

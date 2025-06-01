@@ -1,43 +1,69 @@
+# SAI-Cam Camera Proxy Configuration (Static Template)
+# 
+# NOTE: This file serves as a fallback template. During installation,
+# the install.sh script automatically generates proxy configurations
+# based on camera IP addresses found in config.yaml, starting from port 8080.
+#
+# If no cameras are found in config.yaml, this static configuration is used.
+# 
+# Each camera gets its own proxy port starting from 8080:
+# - Camera 1: http://node-ip:8080 -> http://camera1-ip:80
+# - Camera 2: http://node-ip:8081 -> http://camera2-ip:80
+# - Camera 3: http://node-ip:8082 -> http://camera3-ip:80
+# - ...up to Camera 20: http://node-ip:8099 -> http://camera20-ip:80
+
 server {
-    listen 8081;
+    listen 8080;
     location / {
-        proxy_pass http://192.168.220.10:80;
+        proxy_pass http://192.168.220.101:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+    }
+}
+
+server {
+    listen 8081;
+    location / {
+        proxy_pass http://192.168.220.102:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
     }
 }
 
 server {
     listen 8082;
     location / {
-        proxy_pass http://192.168.220.20:80;
+        proxy_pass http://192.168.220.103:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
     }
 }
 
 server {
     listen 8083;
     location / {
-        proxy_pass http://192.168.220.30:80;
+        proxy_pass http://192.168.220.104:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-server {
-    listen 8084;
-    location / {
-        proxy_pass http://192.168.220.40:80;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
     }
 }

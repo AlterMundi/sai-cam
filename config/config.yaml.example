@@ -19,7 +19,7 @@ device:
   location: 'location-name'     # Deployment location
   description: 'SAI-Cam Edge Node'
 
-# Camera configuration - supports up to 4 cameras
+# Camera configuration - supports up to 20 cameras
 cameras:
   - id: 'cam1'
     type: 'rtsp'               # Options: rtsp, usb, onvif
