@@ -1,0 +1,14 @@
+# BFG Repo-Cleaner replacement patterns
+# Replace real credentials with safe placeholders
+
+# Real IP address
+192.168.220.71==>192.168.1.100
+
+# Real password
+Saicam1!==>your_password_here
+
+# Real subnet (if found)
+192.168.220==>192.168.1
+
+# Real authentication strings
+admin:Saicam1!==>admin:your_password_here
