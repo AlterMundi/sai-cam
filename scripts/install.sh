@@ -71,7 +71,7 @@ CONFIGURATION:
     Edit config/config.yaml before running this script. Key sections:
 
     network:           # Optional - for static IP configuration
-      node_ip: '192.168.220.10/24'
+      node_ip: '192.168.220.1/24'
       interface: 'eth0'
       connection_name: 'saicam'
 
@@ -151,7 +151,7 @@ DEFAULT_USER="admin"
 DEFAULT_GROUP="admin"
 
 # Network configuration defaults (can be overridden by config.yaml)
-DEFAULT_NODE_IP="192.168.220.10/24"
+DEFAULT_NODE_IP="192.168.220.1/24"
 DEFAULT_INTERFACE="eth0"
 DEFAULT_CONNECTION_NAME="saicam"
 
