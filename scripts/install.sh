@@ -3,6 +3,7 @@ set -e
 
 # Default values
 CONFIG_ONLY=false
+PRESERVE_CONFIG=false
 
 # Function to display help information
 show_help() {
@@ -19,8 +20,9 @@ USAGE:
     sudo ./install.sh [OPTIONS]
 
 OPTIONS:
-    -c, --config-only     Update configuration files only (no system changes)
-    -h, --help           Show this help message and exit
+    -c, --config-only         Update configuration files only (no code/system changes)
+    -p, --preserve-config     Update code only, preserve existing configuration
+    -h, --help               Show this help message and exit
 
 EXAMPLES:
     # Full installation (requires sudo)
@@ -28,6 +30,9 @@ EXAMPLES:
 
     # Update configuration only
     sudo ./install.sh --config-only
+
+    # Update code and preserve production configuration
+    sudo ./install.sh --preserve-config
 
     # Show help
     ./install.sh --help
@@ -66,6 +71,13 @@ Configuration-Only Update (-c flag used):
     2. Updates config.yaml file only
     3. Preserves all system settings and services
     4. Suggests service restart if needed
+
+Code-Only Update (-p flag used):
+    1. Backs up existing files
+    2. Updates all code files (camera_service.py, camera modules, etc.)
+    3. Updates systemd service, nginx proxy, and logrotate configs
+    4. Preserves existing /etc/sai-cam/config.yaml
+    5. Restarts service to apply code changes
 
 CONFIGURATION:
     Edit config/config.yaml before running this script. Key sections:
@@ -122,6 +134,10 @@ while [[ $# -gt 0 ]]; do
             CONFIG_ONLY=true
             shift
             ;;
+        -p|--preserve-config)
+            PRESERVE_CONFIG=true
+            shift
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -135,6 +151,18 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Validate that mutually exclusive flags aren't both set
+if [ "$CONFIG_ONLY" = true ] && [ "$PRESERVE_CONFIG" = true ]; then
+    echo "❌ ERROR: --config-only and --preserve-config are mutually exclusive"
+    echo ""
+    echo "Choose one:"
+    echo "  --config-only      : Update configuration only (no code changes)"
+    echo "  --preserve-config  : Update code only (preserve configuration)"
+    echo ""
+    echo "Try '$0 --help' for more information."
+    exit 1
+fi
 
 # Internal variables for system maintenance (not user-configurable)
 INSTALL_DIR="/opt/sai-cam"
@@ -222,9 +250,9 @@ generate_camera_proxy_config() {
                 break
             fi
             
-            # Extract IP addresses from camera entries
-            if [[ "$in_cameras" == true && "$line" =~ ip:.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-                local camera_ip=$(echo "$line" | sed 's/.*ip:\s*['\''\"]*\([0-9.]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//')
+            # Extract IP addresses from camera entries (using 'address:' field)
+            if [[ "$in_cameras" == true && "$line" =~ address:.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                local camera_ip=$(echo "$line" | sed 's/.*address:\s*['\''\"]*\([0-9.]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//')
                 
                 if [[ -n "$camera_ip" && "$camera_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
                     echo "📹 Found camera IP: $camera_ip -> proxy port $port"
@@ -283,7 +311,17 @@ check_required_files() {
         required_files=(
             "$PROJECT_ROOT/config/config.yaml"
         )
+    elif [ "$PRESERVE_CONFIG" = true ]; then
+        # For preserve-config mode, we need code files but not config
+        required_files=(
+            "$PROJECT_ROOT/src/camera_service.py"
+            "$PROJECT_ROOT/config/camera-proxy"
+            "$PROJECT_ROOT/systemd/sai-cam.service"
+            "$PROJECT_ROOT/systemd/logrotate.conf"
+            "$PROJECT_ROOT/requirements.txt"
+        )
     else
+        # Full installation requires everything
         required_files=(
             "$PROJECT_ROOT/src/camera_service.py"
             "$PROJECT_ROOT/config/config.yaml"
@@ -311,22 +349,22 @@ check_required_files() {
         echo "   and that all required files are present."
         exit 1
     fi
-    
+
     echo "✅ All required files found"
 }
 
 # Function to backup existing config
 
 backup_existing_config() {
-    if [ -d "$CONFIG_DIR" ]; then
-        echo "📦 Creating backup of existing configuration..."
+    if [ -d "$CONFIG_DIR" ] || [ -f "/etc/systemd/system/sai-cam.service" ] || [ -f "/etc/logrotate.d/sai-cam" ]; then
+        echo "📦 Creating backup of existing installation..."
         sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/config"
         sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/systemd"
         sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/logrotate"
 
         # Backup configs if they exist
-        if [ -d "$CONFIG_DIR" ]; then
-            sudo cp -r "$CONFIG_DIR"/* "$BACKUP_DIR/$TIMESTAMP/config/"
+        if [ -d "$CONFIG_DIR" ] && [ "$(ls -A $CONFIG_DIR 2>/dev/null)" ]; then
+            sudo cp -r "$CONFIG_DIR"/* "$BACKUP_DIR/$TIMESTAMP/config/" 2>/dev/null || true
             echo "✅ Configuration backup created at: $BACKUP_DIR/$TIMESTAMP/config/"
         fi
 
@@ -337,11 +375,18 @@ backup_existing_config() {
                 echo "✅ Service file backup created: sai-cam.service"
             fi
 
-
             # Backup logrotate config if it exists
             if [ -f "/etc/logrotate.d/sai-cam" ]; then
                 sudo cp "/etc/logrotate.d/sai-cam" "$BACKUP_DIR/$TIMESTAMP/logrotate/"
                 echo "✅ Logrotate config backup created: sai-cam"
+            fi
+
+            # Backup existing code if preserve-config mode
+            if [ "$PRESERVE_CONFIG" = true ] && [ -d "$INSTALL_DIR/bin" ]; then
+                sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/code"
+                sudo cp -r "$INSTALL_DIR/bin" "$BACKUP_DIR/$TIMESTAMP/code/" 2>/dev/null || true
+                sudo cp -r "$INSTALL_DIR/cameras" "$BACKUP_DIR/$TIMESTAMP/code/" 2>/dev/null || true
+                echo "✅ Code backup created at: $BACKUP_DIR/$TIMESTAMP/code/"
             fi
         fi
         
@@ -452,11 +497,22 @@ echo ""
 echo "🐍 Setting Up Python Environment"
 echo "--------------------------------"
 echo "🔧 Creating Python virtual environment..."
-python3 -m venv $INSTALL_DIR/venv
+if ! python3 -m venv $INSTALL_DIR/venv; then
+    echo "❌ ERROR: Failed to create Python virtual environment"
+    exit 1
+fi
+
+if [ ! -f "$INSTALL_DIR/venv/bin/activate" ]; then
+    echo "❌ ERROR: Virtual environment creation failed - activate script not found"
+    exit 1
+fi
 
 echo "📥 Installing Python packages..."
-source $INSTALL_DIR/venv/bin/activate
-$INSTALL_DIR/venv/bin/pip3 install -r $PROJECT_ROOT/requirements.txt > /dev/null 2>&1
+if ! $INSTALL_DIR/venv/bin/pip3 install -r $PROJECT_ROOT/requirements.txt; then
+    echo "❌ ERROR: Failed to install Python packages"
+    echo "   Check requirements.txt and network connectivity"
+    exit 1
+fi
 echo "✅ Python environment configured successfully"
 
 # Copy files
@@ -484,7 +540,19 @@ else
 fi
 
 echo "⚙️  Copying configuration..."
-sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
+if [ "$PRESERVE_CONFIG" = true ]; then
+    # Check if production config exists
+    if [ -f "$CONFIG_DIR/config.yaml" ]; then
+        echo "ℹ️  Preserving existing production configuration at $CONFIG_DIR/config.yaml"
+    else
+        echo "⚠️  WARNING: No existing config found at $CONFIG_DIR/config.yaml"
+        echo "   Installing default configuration from repository"
+        sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
+    fi
+else
+    # Normal mode or config-only mode - install/update config
+    sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
+fi
 
 echo "🌐 Installing Nginx proxy configuration..."
 generate_camera_proxy_config
@@ -568,8 +636,15 @@ else
 fi
 
 echo ""
-echo "🎉 SAI-CAM Installation Completed!"
-echo "=================================="
+if [ "$PRESERVE_CONFIG" = true ]; then
+    echo "🎉 SAI-CAM Code Update Completed!"
+    echo "=================================="
+    echo ""
+    echo "ℹ️  Production configuration preserved at: $CONFIG_DIR/config.yaml"
+else
+    echo "🎉 SAI-CAM Installation Completed!"
+    echo "=================================="
+fi
 echo ""
 echo "📊 Service Status:"
 echo "------------------"
@@ -582,5 +657,11 @@ echo "• Check service logs: sudo journalctl -u sai-cam -f"
 echo "• Edit configuration: sudo nano $CONFIG_DIR/config.yaml"
 echo "• Restart service: sudo systemctl restart sai-cam"
 echo "• View camera feeds: Check Nginx proxy configuration"
+if [ "$PRESERVE_CONFIG" = true ]; then
+    echo ""
+    echo "⚠️  Note: Configuration was preserved from production"
+    echo "   If you need to update config, edit $CONFIG_DIR/config.yaml manually"
+    echo "   or run: sudo ./scripts/install.sh --config-only"
+fi
 echo ""
 echo "📚 For troubleshooting, see the documentation in docs/"
