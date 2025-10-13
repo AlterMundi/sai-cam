@@ -601,12 +601,12 @@ if iw dev wlan0 info > /dev/null 2>&1; then
         echo "🔧 Configuring dnsmasq..."
         sudo cp $PROJECT_ROOT/config/dnsmasq.conf.template /etc/dnsmasq.d/sai-cam.conf
 
-        # Configure wlan0 static IP
+        # Configure wlan0 static IP (manual mode - dnsmasq handles DHCP)
         echo "🔧 Setting up wlan0 interface..."
         if nmcli con show "sai-cam-ap" > /dev/null 2>&1; then
             sudo nmcli con delete "sai-cam-ap"
         fi
-        sudo nmcli con add con-name "sai-cam-ap" ifname wlan0 type wifi mode ap ssid "SAI-Node-$DEVICE_ID" ipv4.method shared ipv4.address 192.168.4.1/24
+        sudo nmcli con add con-name "sai-cam-ap" ifname wlan0 type wifi mode ap ssid "SAI-Node-$DEVICE_ID" ipv4.method manual ipv4.address 192.168.4.1/24
 
         echo "⚙️  Enabling WiFi AP services..."
         sudo systemctl unmask hostapd
