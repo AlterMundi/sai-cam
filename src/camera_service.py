@@ -542,11 +542,20 @@ class StorageManager:
                     for file in uploaded_files:
                         if (datetime.now().timestamp() - file.stat().st_mtime) > \
                            (self.retention_days * 24 * 3600):
-                            # Remove image and its metadata
-                            file.unlink()
-                            meta_file = self.uploaded_path / 'metadata' / f"{file.name}.json"
-                            if meta_file.exists():
-                                meta_file.unlink()
+                            try:
+                                # Remove image and its metadata
+                                file.unlink()
+                                meta_file = self.uploaded_path / 'metadata' / f"{file.name}.json"
+                                if meta_file.exists():
+                                    meta_file.unlink()
+                            except FileNotFoundError:
+                                # File already deleted, skip silently
+                                self.logger.debug(f"Cleanup: File already removed: {file.name}")
+                                continue
+                            except Exception as e:
+                                # Log other errors but continue cleanup
+                                self.logger.warning(f"Failed to delete {file.name}: {str(e)}")
+                                continue
 
                             if self.get_current_size_gb() < self.cleanup_threshold_gb:
                                 break
@@ -560,10 +569,19 @@ class StorageManager:
                     for file in non_uploaded_files:
                         if (datetime.now().timestamp() - file.stat().st_mtime) > \
                            (self.retention_days * 24 * 3600):
-                            file.unlink()
-                            meta_file = self.metadata_path / f"{file.name}.json"
-                            if meta_file.exists():
-                                meta_file.unlink()
+                            try:
+                                file.unlink()
+                                meta_file = self.metadata_path / f"{file.name}.json"
+                                if meta_file.exists():
+                                    meta_file.unlink()
+                            except FileNotFoundError:
+                                # File already deleted, skip silently
+                                self.logger.debug(f"Cleanup: File already removed: {file.name}")
+                                continue
+                            except Exception as e:
+                                # Log other errors but continue cleanup
+                                self.logger.warning(f"Failed to delete {file.name}: {str(e)}")
+                                continue
 
                             if self.get_current_size_gb() < self.cleanup_threshold_gb:
                                 break
