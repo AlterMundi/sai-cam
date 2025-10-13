@@ -108,3 +108,17 @@ advanced:
   polling_interval: 0.1
   reconnect_attempts: 3
   reconnect_delay: 5
+
+# Status Portal Configuration (optional - uses smart defaults if omitted)
+portal:
+  enabled: true            # Enable web status portal
+  port: 80                 # Port for status portal (default: 80)
+  refresh_interval: 5      # Dashboard refresh interval in seconds
+
+# WiFi Access Point Configuration (optional - auto-enabled if wlan0 exists)
+wifi_ap:
+  enabled: auto            # auto = enable if hardware present, true/false to force
+  ssid: auto               # auto = use "SAI-{device_id}", or specify custom SSID
+  password: 'saicam123'    # WiFi password (minimum 8 characters)
+  channel: 6               # WiFi channel (1-11)
+  country_code: 'AR'       # Country code for regulatory compliance

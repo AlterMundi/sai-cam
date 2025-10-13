@@ -14,6 +14,9 @@ watchdog>=3.0.0      # For filesystem monitoring
 # Systemd integration (optional for testing)
 systemd-python>=235  # For systemd watchdog support
 
+# Status portal
+flask>=3.0.0         # For web status portal
+
 # Development and testing (optional)
 # pytest>=7.0.0      # For unit testing
 # black>=22.0.0      # For code formatting

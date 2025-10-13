@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAI-Cam Status Portal</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header id="node-header">
+        <div class="container">
+            <h1>SAI-Cam Status Portal</h1>
+            <div id="node-info">
+                <span id="node-id">Loading...</span>
+                <span id="node-location"></span>
+            </div>
+            <div id="last-update">Last update: <span id="update-time">--</span></div>
+        </div>
+    </header>
+
+    <main id="blocks-container" class="container">
+        <!-- Blocks will be dynamically inserted here -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading status...</p>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>SAI-Cam Edge Node &middot; Version <span id="version">--</span></p>
+        </div>
+    </footer>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

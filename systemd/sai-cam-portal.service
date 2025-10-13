@@ -1,0 +1,26 @@
+[Unit]
+Description=SAI-Cam Status Portal
+After=network.target sai-cam.service
+Wants=sai-cam.service
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/opt/sai-cam
+ExecStart=/opt/sai-cam/venv/bin/python3 /opt/sai-cam/status_portal.py --config /etc/sai-cam/config.yaml --port 8090
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/sai-cam /opt/sai-cam/storage
+ReadOnlyPaths=/etc/sai-cam
+
+[Install]
+WantedBy=multi-user.target

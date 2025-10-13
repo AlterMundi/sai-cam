@@ -211,6 +211,9 @@ read_config_value() {
             "system.group")
                 grep -E "^\s*group:" "$config_file" | sed 's/.*group:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
+            "device.id")
+                grep -A 3 "^device:" "$config_file" | grep -E "^\s*id:" | sed 's/.*id:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
+                ;;
             *)
                 echo "$default_value"
                 ;;
@@ -528,6 +531,12 @@ echo "📦 Installing camera modules..."
 sudo cp -r $PROJECT_ROOT/src/cameras $INSTALL_DIR/
 sudo cp $PROJECT_ROOT/src/config_helper.py $INSTALL_DIR/
 
+# Copy status portal
+echo "🌐 Installing status portal..."
+sudo cp $PROJECT_ROOT/src/status_portal.py $INSTALL_DIR/
+sudo mkdir -p $INSTALL_DIR/portal
+sudo cp -r $PROJECT_ROOT/src/portal/* $INSTALL_DIR/portal/
+
 # Copy environment configuration if it exists
 if [ -f "$PROJECT_ROOT/.env" ]; then
     echo "🔐 Installing environment configuration..."
@@ -557,12 +566,62 @@ fi
 echo "🌐 Installing Nginx proxy configuration..."
 generate_camera_proxy_config
 
-echo "🔧 Installing systemd service..."
+echo "🔧 Installing systemd services..."
 sudo cp $PROJECT_ROOT/systemd/sai-cam.service /etc/systemd/system/sai-cam.service
+sudo cp $PROJECT_ROOT/systemd/sai-cam-portal.service /etc/systemd/system/sai-cam-portal.service
 
 echo "📝 Installing log rotation configuration..."
 sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
 echo "✅ Service files installed successfully"
+
+# WiFi AP Configuration (auto-detect hardware)
+echo ""
+echo "📡 Checking WiFi Access Point Support"
+echo "-------------------------------------"
+if iw dev wlan0 info > /dev/null 2>&1; then
+    echo "✅ WiFi hardware detected (wlan0)"
+    echo "📥 Installing WiFi AP packages..."
+    if sudo apt-get install -y hostapd dnsmasq > /dev/null 2>&1; then
+        echo "✅ WiFi AP packages installed"
+
+        # Generate WiFi AP configuration from config.yaml
+        DEVICE_ID=$(read_config_value "device.id" "unknown")
+        WIFI_PASSWORD=$(grep -A 5 "^wifi_ap:" "$PROJECT_ROOT/config/config.yaml" | grep "password:" | sed "s/.*password:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/" | sed 's/[[:space:]]*$//')
+
+        # Use default password if not found in config
+        if [ -z "$WIFI_PASSWORD" ]; then
+            WIFI_PASSWORD="saicam123"
+        fi
+
+        echo "🔧 Configuring hostapd..."
+        sudo cp $PROJECT_ROOT/config/hostapd.conf.template /etc/hostapd/hostapd.conf
+        sudo sed -i "s/SAI-Node-PLACEHOLDER/SAI-Node-$DEVICE_ID/g" /etc/hostapd/hostapd.conf
+        sudo sed -i "s/PASSWORDPLACEHOLDER/$WIFI_PASSWORD/g" /etc/hostapd/hostapd.conf
+
+        echo "🔧 Configuring dnsmasq..."
+        sudo cp $PROJECT_ROOT/config/dnsmasq.conf.template /etc/dnsmasq.d/sai-cam.conf
+
+        # Configure wlan0 static IP
+        echo "🔧 Setting up wlan0 interface..."
+        if nmcli con show "sai-cam-ap" > /dev/null 2>&1; then
+            sudo nmcli con delete "sai-cam-ap"
+        fi
+        sudo nmcli con add con-name "sai-cam-ap" ifname wlan0 type wifi mode ap ssid "SAI-Node-$DEVICE_ID" ipv4.method shared ipv4.address 192.168.4.1/24
+
+        echo "⚙️  Enabling WiFi AP services..."
+        sudo systemctl unmask hostapd
+        sudo systemctl enable hostapd
+        sudo systemctl enable dnsmasq
+
+        echo "✅ WiFi AP configured successfully"
+        echo "   SSID: SAI-Node-$DEVICE_ID"
+        echo "   Password: $WIFI_PASSWORD"
+    else
+        echo "⚠️  Failed to install WiFi AP packages, skipping AP setup"
+    fi
+else
+    echo "⊘ No WiFi hardware detected, skipping AP setup"
+fi
 
 # Set permissions
 echo ""
@@ -580,6 +639,11 @@ sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
 # Set permissions for new camera modules
 sudo find $INSTALL_DIR/cameras -name "*.py" -exec chmod 644 {} \;
 sudo chmod 644 $INSTALL_DIR/config_helper.py
+
+# Set permissions for status portal
+sudo chmod 755 $INSTALL_DIR/status_portal.py
+sudo find $INSTALL_DIR/portal -type f -exec chmod 644 {} \;
+sudo find $INSTALL_DIR/portal -type d -exec chmod 755 {} \;
 
 # Secure environment file if it exists
 if [ -f "$INSTALL_DIR/.env" ]; then
@@ -612,8 +676,9 @@ echo "----------------------------"
 echo "🔄 Reloading systemd daemon..."
 sudo systemctl daemon-reload
 
-echo "⚙️  Enabling sai-cam service..."
+echo "⚙️  Enabling services..."
 sudo systemctl enable sai-cam
+sudo systemctl enable sai-cam-portal
 
 echo "📹 Starting sai-cam service..."
 # Check if service is already running and restart it to apply new code
@@ -635,6 +700,22 @@ else
     fi
 fi
 
+echo "🌐 Starting status portal service..."
+if systemctl is-active --quiet sai-cam-portal; then
+    echo "🔄 Portal is running, restarting..."
+    sudo systemctl restart sai-cam-portal
+else
+    sudo systemctl start sai-cam-portal
+fi
+
+if systemctl is-active --quiet sai-cam-portal; then
+    echo "✅ Status portal started successfully"
+    echo "   Access at: http://$(hostname -I | awk '{print $1}')/"
+else
+    echo "⚠️  Status portal failed to start"
+    echo "   Check logs: sudo journalctl -u sai-cam-portal -n 20"
+fi
+
 echo ""
 if [ "$PRESERVE_CONFIG" = true ]; then
     echo "🎉 SAI-CAM Code Update Completed!"
@@ -653,10 +734,12 @@ sudo systemctl status sai-cam --no-pager -l
 echo ""
 echo "🔍 Next Steps:"
 echo "--------------"
+echo "• Access status portal: http://$(hostname -I | awk '{print $1}')/"
 echo "• Check service logs: sudo journalctl -u sai-cam -f"
+echo "• Check portal logs: sudo journalctl -u sai-cam-portal -f"
 echo "• Edit configuration: sudo nano $CONFIG_DIR/config.yaml"
-echo "• Restart service: sudo systemctl restart sai-cam"
-echo "• View camera feeds: Check Nginx proxy configuration"
+echo "• Restart services: sudo systemctl restart sai-cam sai-cam-portal"
+echo "• View camera feeds: Check Nginx proxy configuration (ports 8080+)"
 if [ "$PRESERVE_CONFIG" = true ]; then
     echo ""
     echo "⚠️  Note: Configuration was preserved from production"
