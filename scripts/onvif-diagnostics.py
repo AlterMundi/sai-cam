@@ -107,7 +107,8 @@ def test_onvif_connection(host, port, user, password):
     try:
         # Create ONVIF camera object
         log("Creating ONVIF camera object...", "INFO")
-        cam = ONVIFCamera(host, port, user, password, wsdl_dir='/opt/sai-cam/wsdl')
+        # Let onvif-zeep use its built-in WSDL files
+        cam = ONVIFCamera(host, port, user, password)
 
         # Get device information
         log("\nGetting device information...", "INFO")
