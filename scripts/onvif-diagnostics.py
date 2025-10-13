@@ -107,8 +107,28 @@ def test_onvif_connection(host, port, user, password):
     try:
         # Create ONVIF camera object
         log("Creating ONVIF camera object...", "INFO")
-        # Let onvif-zeep use its built-in WSDL files
-        cam = ONVIFCamera(host, port, user, password)
+
+        # Find WSDL directory - onvif-zeep puts them in a python3.4 directory
+        import os
+        import onvif
+        onvif_dir = os.path.dirname(onvif.__file__)
+        # Look for wsdl in parent site-packages (handles python3.4 quirk)
+        site_packages = os.path.dirname(os.path.dirname(onvif_dir))
+        wsdl_candidates = [
+            os.path.join(site_packages, 'wsdl'),  # Standard location
+            os.path.join(site_packages, 'python3.4', 'site-packages', 'wsdl'),  # Quirky location
+        ]
+        wsdl_dir = None
+        for candidate in wsdl_candidates:
+            if os.path.exists(os.path.join(candidate, 'devicemgmt.wsdl')):
+                wsdl_dir = candidate
+                break
+
+        if wsdl_dir:
+            cam = ONVIFCamera(host, port, user, password, wsdl_dir=wsdl_dir)
+        else:
+            # Fallback: try without wsdl_dir (may work on some systems)
+            cam = ONVIFCamera(host, port, user, password)
 
         # Get device information
         log("\nGetting device information...", "INFO")
