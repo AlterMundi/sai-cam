@@ -112,12 +112,16 @@ def test_onvif_connection(host, port, user, password):
         import os
         import onvif
         onvif_dir = os.path.dirname(onvif.__file__)
-        # Look for wsdl in parent site-packages (handles python3.4 quirk)
-        site_packages = os.path.dirname(os.path.dirname(onvif_dir))
+        # onvif is at venv/lib/python3.11/site-packages/onvif
+        # wsdl is at venv/lib/python3.4/site-packages/wsdl
+        venv_lib = os.path.dirname(os.path.dirname(os.path.dirname(onvif_dir)))
+
         wsdl_candidates = [
-            os.path.join(site_packages, 'wsdl'),  # Standard location
-            os.path.join(site_packages, 'python3.4', 'site-packages', 'wsdl'),  # Quirky location
+            os.path.join(os.path.dirname(onvif_dir), 'wsdl'),  # Same site-packages
+            os.path.join(venv_lib, 'python3.4', 'site-packages', 'wsdl'),  # Quirky python3.4 location
+            os.path.join(venv_lib, 'wsdl'),  # Directly in lib
         ]
+
         wsdl_dir = None
         for candidate in wsdl_candidates:
             if os.path.exists(os.path.join(candidate, 'devicemgmt.wsdl')):
