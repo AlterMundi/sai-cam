@@ -12,7 +12,7 @@ import psutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, jsonify, send_from_directory, Response
+from flask import Flask, jsonify, send_from_directory, Response, request
 from threading import Thread
 import time
 import logging

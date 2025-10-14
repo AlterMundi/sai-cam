@@ -36,27 +36,73 @@ body {
 /* Header */
 
 header {
-  background: var(--primary-color);
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
   color: white;
   padding: 20px 0;
-  box-shadow: var(--shadow);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
-header h1 {
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.logo {
+  height: 50px;
+  width: auto;
+  /* Remove filter if logo is already light/white */
+}
+
+.title-section h1 {
   font-size: 1.8em;
   font-weight: 600;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
+  line-height: 1.2;
+}
+
+.title-section .subtitle {
+  font-size: 0.9em;
+  opacity: 0.8;
+  margin: 0;
+}
+
+.header-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 15px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 #node-info {
   display: flex;
   gap: 20px;
   font-size: 0.95em;
-  margin-bottom: 10px;
 }
 
 #node-info span {
   opacity: 0.9;
+}
+
+#network-info {
+  display: flex;
+  gap: 15px;
+  font-size: 0.9em;
+}
+
+#network-info span {
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  font-family: monospace;
 }
 
 #last-update {
@@ -541,11 +587,38 @@ footer p {
 }
 
 @media (max-width: 768px) {
-  header h1 {
-    font-size: 1.5em;
+  .header-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+
+  .logo-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .logo {
+    height: 40px;
+  }
+
+  .title-section h1 {
+    font-size: 1.4em;
+  }
+
+  .header-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
   }
 
   #node-info {
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  #network-info {
     flex-direction: column;
     gap: 5px;
   }

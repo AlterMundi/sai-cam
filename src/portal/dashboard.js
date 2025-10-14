@@ -13,7 +13,7 @@ const BLOCKS = {
     icon: '🖥️',
     order: 1,
     detector: (status) => true,  // Always present
-    render: (data) => {
+    render: function(data) {
       const sys = data.system;
       const tempGauge = sys.temperature ? `
         <div class="gauge">
@@ -77,7 +77,7 @@ const BLOCKS = {
     icon: '📡',
     order: 2,
     detector: (status) => status.features.wifi_ap && status.data.wifi_ap !== null,
-    render: (data) => {
+    render: function(data) {
       const wifi = data.wifi_ap;
       return `
         <div class="block">
@@ -110,7 +110,7 @@ const BLOCKS = {
     icon: '📷',
     order: 3,
     detector: (status) => status.features.cameras && status.data.cameras.length > 0,
-    render: (data) => {
+    render: function(data) {
       const cameras = data.cameras;
       const onlineCount = cameras.filter(c => c.online).length;
 
@@ -158,7 +158,7 @@ const BLOCKS = {
     icon: '💾',
     order: 4,
     detector: (status) => status.features.storage && status.data.storage !== null,
-    render: (data) => {
+    render: function(data) {
       const storage = data.storage;
       const pendingPercent = storage.total_images > 0
         ? Math.round((storage.pending_images / storage.total_images) * 100)
@@ -199,7 +199,7 @@ const BLOCKS = {
     icon: '🌐',
     order: 5,
     detector: (status) => status.data.network !== null,
-    render: (data) => {
+    render: function(data) {
       const network = data.network;
       const interfaces = Object.entries(network.interfaces || {}).map(([name, iface]) => `
         <div class="network-interface">
@@ -235,7 +235,7 @@ const BLOCKS = {
     icon: '📄',
     order: 6,
     detector: (status) => true,
-    render: (data) => {
+    render: function(data) {
       // Logs will be fetched separately
       return `
         <div class="block wide">
@@ -268,7 +268,7 @@ function formatUptime(seconds) {
 function createBlock(blockConfig, data) {
   const blockEl = document.createElement('div');
   blockEl.className = 'block-wrapper';
-  blockEl.innerHTML = blockConfig.render(data);
+  blockEl.innerHTML = blockConfig.render.call(blockConfig, data);
   return blockEl;
 }
 
@@ -342,6 +342,19 @@ async function renderDashboard() {
   document.getElementById('version').textContent = status.node.version;
   document.getElementById('update-time').textContent = new Date().toLocaleTimeString();
 
+  // Update network info in header
+  if (status.data.network) {
+    const network = status.data.network;
+    // Find WAN interface (eth0 or first non-wlan interface)
+    const wanIface = Object.entries(network.interfaces || {}).find(([name]) => name === 'eth0' || !name.startsWith('wlan'));
+    const wanInfo = wanIface ? `WAN: ${wanIface[0]} (${wanIface[1].ip})` : 'WAN: --';
+    const internetStatus = network.upstream_online ? 'Internet: ✓ Online' : 'Internet: ✗ Offline';
+
+    document.getElementById('wan-interface').textContent = wanInfo;
+    document.getElementById('internet-status').textContent = internetStatus;
+    document.getElementById('internet-status').style.color = network.upstream_online ? '#27ae60' : '#e74c3c';
+  }
+
   // Render blocks
   const container = document.getElementById('blocks-container');
   const loading = document.getElementById('loading');
@@ -355,9 +368,9 @@ async function renderDashboard() {
   // Sort blocks by order
   const sortedBlocks = Object.entries(BLOCKS).sort((a, b) => a[1].order - b[1].order);
 
-  sortedBlocks.forEach(([key, block]) => {
-    if (block.detector(status)) {
-      const blockEl = createBlock(block, status.data);
+  sortedBlocks.forEach(([key, blockConfig]) => {
+    if (blockConfig.detector(status)) {
+      const blockEl = createBlock(blockConfig, status.data);
       container.appendChild(blockEl);
     }
   });

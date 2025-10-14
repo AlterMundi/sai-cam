@@ -574,50 +574,65 @@ echo "📝 Installing log rotation configuration..."
 sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
 echo "✅ Service files installed successfully"
 
-# WiFi AP Configuration (auto-detect hardware)
+# WiFi AP Configuration (NetworkManager-based approach)
 echo ""
 echo "📡 Checking WiFi Access Point Support"
 echo "-------------------------------------"
 if iw dev wlan0 info > /dev/null 2>&1; then
     echo "✅ WiFi hardware detected (wlan0)"
-    echo "📥 Installing WiFi AP packages..."
-    if sudo apt-get install -y hostapd dnsmasq > /dev/null 2>&1; then
-        echo "✅ WiFi AP packages installed"
 
-        # Generate WiFi AP configuration from config.yaml
-        DEVICE_ID=$(read_config_value "device.id" "unknown")
-        WIFI_PASSWORD=$(grep -A 5 "^wifi_ap:" "$PROJECT_ROOT/config/config.yaml" | grep "password:" | sed "s/.*password:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/" | sed 's/[[:space:]]*$//')
+    # Generate WiFi AP configuration from config.yaml
+    DEVICE_ID=$(read_config_value "device.id" "unknown")
+    WIFI_PASSWORD=$(grep -A 5 "^wifi_ap:" "$PROJECT_ROOT/config/config.yaml" | grep "password:" | sed "s/.*password:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/" | sed 's/[[:space:]]*$//')
 
-        # Use default password if not found in config
-        if [ -z "$WIFI_PASSWORD" ]; then
-            WIFI_PASSWORD="saicam123"
-        fi
+    # Use default password if not found in config
+    if [ -z "$WIFI_PASSWORD" ]; then
+        WIFI_PASSWORD="saicam123"
+    fi
 
-        echo "🔧 Configuring hostapd..."
-        sudo cp $PROJECT_ROOT/config/hostapd.conf.template /etc/hostapd/hostapd.conf
-        sudo sed -i "s/SAI-Node-PLACEHOLDER/SAI-Node-$DEVICE_ID/g" /etc/hostapd/hostapd.conf
-        sudo sed -i "s/PASSWORDPLACEHOLDER/$WIFI_PASSWORD/g" /etc/hostapd/hostapd.conf
+    echo "🔧 Configuring NetworkManager WiFi AP..."
 
-        echo "🔧 Configuring dnsmasq..."
-        sudo cp $PROJECT_ROOT/config/dnsmasq.conf.template /etc/dnsmasq.d/sai-cam.conf
+    # Remove existing connection if it exists
+    if nmcli con show "sai-cam-ap" > /dev/null 2>&1; then
+        echo "🗑️  Removing existing WiFi AP connection..."
+        sudo nmcli con delete "sai-cam-ap" > /dev/null 2>&1
+    fi
 
-        # Configure wlan0 static IP (manual mode - dnsmasq handles DHCP)
-        echo "🔧 Setting up wlan0 interface..."
-        if nmcli con show "sai-cam-ap" > /dev/null 2>&1; then
-            sudo nmcli con delete "sai-cam-ap"
-        fi
-        sudo nmcli con add con-name "sai-cam-ap" ifname wlan0 type wifi mode ap ssid "SAI-Node-$DEVICE_ID" ipv4.method manual ipv4.address 192.168.4.1/24
+    # Create NetworkManager WiFi AP connection
+    # Uses 'shared' mode which automatically spawns dnsmasq for DHCP
+    echo "✨ Creating WiFi AP connection..."
+    sudo nmcli con add \
+        con-name "sai-cam-ap" \
+        ifname wlan0 \
+        type wifi \
+        mode ap \
+        ssid "SAI-Node-$DEVICE_ID" \
+        ipv4.method shared \
+        ipv4.address 192.168.4.1/24 \
+        wifi-sec.key-mgmt wpa-psk \
+        wifi-sec.psk "$WIFI_PASSWORD" > /dev/null 2>&1
 
-        echo "⚙️  Enabling WiFi AP services..."
-        sudo systemctl unmask hostapd
-        sudo systemctl enable hostapd
-        sudo systemctl enable dnsmasq
+    # Enable autoconnect on boot
+    sudo nmcli con modify sai-cam-ap connection.autoconnect yes
 
-        echo "✅ WiFi AP configured successfully"
+    # Disable conflicting services (NetworkManager handles everything)
+    echo "🧹 Disabling conflicting services..."
+    sudo systemctl stop hostapd dnsmasq 2>/dev/null || true
+    sudo systemctl disable hostapd dnsmasq 2>/dev/null || true
+    sudo systemctl mask dnsmasq 2>/dev/null || true
+
+    # Bring up the WiFi AP
+    echo "🚀 Activating WiFi AP..."
+    if sudo nmcli con up sai-cam-ap > /dev/null 2>&1; then
+        echo "✅ WiFi AP configured and activated successfully"
         echo "   SSID: SAI-Node-$DEVICE_ID"
         echo "   Password: $WIFI_PASSWORD"
+        echo "   IP: 192.168.4.1"
+        echo "   DHCP: 192.168.4.10-254 (managed by NetworkManager)"
+        echo "   Backend: NetworkManager + wpa_supplicant (AP mode)"
     else
-        echo "⚠️  Failed to install WiFi AP packages, skipping AP setup"
+        echo "⚠️  WiFi AP connection created but failed to activate"
+        echo "   Try manually: sudo nmcli con up sai-cam-ap"
     fi
 else
     echo "⊘ No WiFi hardware detected, skipping AP setup"

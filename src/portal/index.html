@@ -4,17 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAI-Cam Status Portal</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <header id="node-header">
         <div class="container">
-            <h1>SAI-Cam Status Portal</h1>
-            <div id="node-info">
-                <span id="node-id">Loading...</span>
-                <span id="node-location"></span>
+            <div class="header-top">
+                <div class="logo-section">
+                    <img src="https://altermundi.net/wp-content/uploads/2020/03/logo1.png" alt="AlterMundi" class="logo">
+                    <div class="title-section">
+                        <h1>SAI - Sistema de Alerta de Incendios</h1>
+                        <p class="subtitle">Edge Node Status Portal</p>
+                    </div>
+                </div>
+                <div id="last-update">Last update: <span id="update-time">--</span></div>
             </div>
-            <div id="last-update">Last update: <span id="update-time">--</span></div>
+            <div class="header-info">
+                <div id="node-info">
+                    <span id="node-id">Loading...</span>
+                    <span id="node-location"></span>
+                </div>
+                <div id="network-info">
+                    <span id="wan-interface">WAN: --</span>
+                    <span id="internet-status">Internet: --</span>
+                </div>
+            </div>
         </div>
     </header>
 
