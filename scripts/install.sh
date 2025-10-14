@@ -623,6 +623,19 @@ if iw dev wlan0 info > /dev/null 2>&1; then
     sudo systemctl disable hostapd dnsmasq 2>/dev/null || true
     sudo systemctl mask dnsmasq 2>/dev/null || true
 
+    # Stop wpa_supplicant (conflicts with NetworkManager AP mode)
+    echo "🔧 Configuring WiFi for AP mode..."
+    sudo systemctl stop wpa_supplicant 2>/dev/null || true
+
+    # Unblock WiFi (required on fresh Raspberry Pi OS installations)
+    echo "📡 Unblocking WiFi radio..."
+    sudo rfkill unblock wifi 2>/dev/null || true
+
+    # Restart NetworkManager to reinitialize WiFi interface
+    echo "🔄 Restarting NetworkManager..."
+    sudo systemctl restart NetworkManager
+    sleep 3
+
     # Bring up the WiFi AP
     echo "🚀 Activating WiFi AP..."
     if sudo nmcli con up sai-cam-ap > /dev/null 2>&1; then
@@ -631,10 +644,10 @@ if iw dev wlan0 info > /dev/null 2>&1; then
         echo "   Password: $WIFI_PASSWORD"
         echo "   IP: 192.168.4.1"
         echo "   DHCP: 192.168.4.10-254 (managed by NetworkManager)"
-        echo "   Backend: NetworkManager + wpa_supplicant (AP mode)"
     else
         echo "⚠️  WiFi AP connection created but failed to activate"
-        echo "   Try manually: sudo nmcli con up sai-cam-ap"
+        echo "   This can happen if WiFi is in use or rfkill blocked"
+        echo "   Try manually: sudo rfkill unblock wifi && sudo systemctl stop wpa_supplicant && sudo nmcli con up sai-cam-ap"
     fi
 else
     echo "⊘ No WiFi hardware detected, skipping AP setup"
