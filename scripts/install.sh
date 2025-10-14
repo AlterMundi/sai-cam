@@ -103,6 +103,8 @@ FILES CREATED/MODIFIED:
     /etc/sai-cam/config.yaml   # Service configuration
     /var/log/sai-cam/          # Log files
     /etc/systemd/system/sai-cam.service
+    /etc/systemd/system/sai-cam-portal.service
+    /etc/nginx/sites-available/portal-nginx.conf
     /etc/nginx/sites-available/camera-proxy
     /etc/logrotate.d/sai-cam
 
@@ -667,10 +669,25 @@ fi
 
 echo "✅ Permissions configured successfully"
 
-# Setup Camera Proxy
+# Setup Nginx Configurations
 echo ""
 echo "🌐 Configuring Nginx Proxy"
 echo "--------------------------"
+
+# Install portal nginx configuration (serves portal on port 80)
+echo "🔧 Installing portal nginx configuration..."
+sudo cp "$PROJECT_ROOT/config/portal-nginx.conf" /etc/nginx/sites-available/portal-nginx.conf
+sudo chmod 644 /etc/nginx/sites-available/portal-nginx.conf
+
+# Disable default nginx site
+echo "🗑️  Disabling default nginx site..."
+sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+
+# Enable portal site
+echo "🔗 Enabling portal site..."
+sudo ln -sf /etc/nginx/sites-available/portal-nginx.conf /etc/nginx/sites-enabled/ 2>/dev/null || true
+
+# Enable camera proxy site
 echo "🔗 Enabling camera proxy site..."
 sudo ln -sf /etc/nginx/sites-available/camera-proxy /etc/nginx/sites-enabled/ 2>/dev/null || true
 
