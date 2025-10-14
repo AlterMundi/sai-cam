@@ -631,7 +631,14 @@ if iw dev wlan0 info > /dev/null 2>&1; then
     echo "📡 Unblocking WiFi radio..."
     sudo rfkill unblock wifi 2>/dev/null || true
 
-    # Restart NetworkManager to reinitialize WiFi interface
+    # Configure captive portal DNS hijacking
+    echo "🌐 Configuring captive portal..."
+    sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+    sudo cp "$PROJECT_ROOT/config/captive-portal-dnsmasq.conf" /etc/NetworkManager/dnsmasq-shared.d/
+    sudo chmod 644 /etc/NetworkManager/dnsmasq-shared.d/captive-portal-dnsmasq.conf
+    echo "✅ Captive portal DNS configuration installed"
+
+    # Restart NetworkManager to reinitialize WiFi interface and load dnsmasq config
     echo "🔄 Restarting NetworkManager..."
     sudo systemctl restart NetworkManager
     sleep 3
@@ -644,6 +651,7 @@ if iw dev wlan0 info > /dev/null 2>&1; then
         echo "   Password: $WIFI_PASSWORD"
         echo "   IP: 192.168.4.1"
         echo "   DHCP: 192.168.4.10-254 (managed by NetworkManager)"
+        echo "   Captive Portal: Enabled (auto-redirect to status portal)"
     else
         echo "⚠️  WiFi AP connection created but failed to activate"
         echo "   This can happen if WiFi is in use or rfkill blocked"
