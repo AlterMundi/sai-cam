@@ -16,9 +16,11 @@ const BLOCKS = {
     render: function(data) {
       const sys = data.system;
       const tempGauge = sys.temperature ? `
-        <div class="gauge">
-          <div class="gauge-label">Temperature</div>
+        <div class="gauge gauge-temp">
           <div class="gauge-value ${sys.temperature > 70 ? 'critical' : sys.temperature > 60 ? 'warning' : ''}">${sys.temperature}°C</div>
+          <div class="gauge-info">
+            <div class="gauge-label">Temperature</div>
+          </div>
         </div>
       ` : '';
 
@@ -27,7 +29,6 @@ const BLOCKS = {
           <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
           <div class="gauges">
             <div class="gauge">
-              <div class="gauge-label">CPU</div>
               <div class="gauge-circle">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -37,9 +38,11 @@ const BLOCKS = {
                   <text x="18" y="20.35" class="percentage">${sys.cpu_percent}%</text>
                 </svg>
               </div>
+              <div class="gauge-info">
+                <div class="gauge-label">CPU</div>
+              </div>
             </div>
             <div class="gauge">
-              <div class="gauge-label">Memory</div>
               <div class="gauge-circle">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -49,10 +52,12 @@ const BLOCKS = {
                   <text x="18" y="20.35" class="percentage">${sys.memory_percent}%</text>
                 </svg>
               </div>
-              <div class="gauge-detail">${sys.memory_used_mb}MB / ${sys.memory_total_mb}MB</div>
+              <div class="gauge-info">
+                <div class="gauge-label">Memory</div>
+                <div class="gauge-detail">${sys.memory_used_mb}MB / ${sys.memory_total_mb}MB</div>
+              </div>
             </div>
             <div class="gauge">
-              <div class="gauge-label">Disk</div>
               <div class="gauge-circle">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -62,7 +67,10 @@ const BLOCKS = {
                   <text x="18" y="20.35" class="percentage">${sys.disk_percent}%</text>
                 </svg>
               </div>
-              <div class="gauge-detail">${sys.disk_used_gb}GB / ${sys.disk_total_gb}GB</div>
+              <div class="gauge-info">
+                <div class="gauge-label">Disk</div>
+                <div class="gauge-detail">${sys.disk_used_gb}GB / ${sys.disk_total_gb}GB</div>
+              </div>
             </div>
             ${tempGauge}
           </div>
