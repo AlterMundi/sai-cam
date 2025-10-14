@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SAI-Cam Status Portal</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="styles.css">
@@ -33,19 +33,19 @@
         </div>
     </header>
 
-    <main id="blocks-container" class="container">
-        <!-- Blocks will be dynamically inserted here -->
-        <div id="loading" class="loading">
-            <div class="spinner"></div>
-            <p>Loading status...</p>
-        </div>
-    </main>
+    <div class="container">
+        <main id="blocks-container">
+            <!-- Blocks will be dynamically inserted here -->
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                <p>Loading status...</p>
+            </div>
+        </main>
 
-    <footer>
-        <div class="container">
+        <footer>
             <p>SAI-Cam Edge Node &middot; Version <span id="version">--</span></p>
-        </div>
-    </footer>
+        </footer>
+    </div>
 
     <script src="dashboard.js"></script>
 </body>
