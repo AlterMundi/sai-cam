@@ -28,7 +28,11 @@ import numpy as np
 VERSION = "0.1.0"  # Version bump for multi-camera support
 
 # Force FFMPEG to use TCP transport for all RTSP connections
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128|pixel_format;yuv420p"
+# Default: H.264 for broad compatibility (EZViz cameras, Raspberry Pi 3B)
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h264|pixel_format;yuv420p"
+
+# Alternative for cameras with H.265 support and systems with hardware acceleration:
+# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128|pixel_format;yuv420p"
 
 class CameraInstance:
     """Represents a single camera instance with its own configuration and state"""
