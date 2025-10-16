@@ -402,6 +402,60 @@ def api_config():
 
     return jsonify(sanitized)
 
+@app.route('/api/wifi_ap/enable', methods=['POST'])
+def api_wifi_enable():
+    """Enable WiFi Access Point"""
+    try:
+        logger.info("Attempting to enable WiFi AP (sai-cam-ap)")
+        result = subprocess.run(
+            ['sudo', 'nmcli', 'con', 'up', 'sai-cam-ap'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            logger.info("WiFi AP enabled successfully")
+            return jsonify({'success': True, 'message': 'WiFi AP enabled successfully'})
+        else:
+            error_msg = result.stderr.strip() or result.stdout.strip()
+            logger.error(f"Failed to enable WiFi AP: {error_msg}")
+            return jsonify({'success': False, 'error': error_msg}), 500
+
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout while enabling WiFi AP")
+        return jsonify({'success': False, 'error': 'Operation timed out'}), 500
+    except Exception as e:
+        logger.error(f"Error enabling WiFi AP: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/wifi_ap/disable', methods=['POST'])
+def api_wifi_disable():
+    """Disable WiFi Access Point"""
+    try:
+        logger.info("Attempting to disable WiFi AP (sai-cam-ap)")
+        result = subprocess.run(
+            ['sudo', 'nmcli', 'con', 'down', 'sai-cam-ap'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            logger.info("WiFi AP disabled successfully")
+            return jsonify({'success': True, 'message': 'WiFi AP disabled successfully'})
+        else:
+            error_msg = result.stderr.strip() or result.stdout.strip()
+            logger.error(f"Failed to disable WiFi AP: {error_msg}")
+            return jsonify({'success': False, 'error': error_msg}), 500
+
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout while disabling WiFi AP")
+        return jsonify({'success': False, 'error': 'Operation timed out'}), 500
+    except Exception as e:
+        logger.error(f"Error disabling WiFi AP: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def main():
     """Main entry point"""
     import argparse

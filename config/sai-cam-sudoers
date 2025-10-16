@@ -1,0 +1,9 @@
+# SAI-Cam sudoers configuration
+# Allows admin user to manage WiFi AP via NetworkManager without password
+# Install to /etc/sudoers.d/sai-cam with permissions 0440
+
+# User admin can manage sai-cam-ap connection
+admin ALL=(ALL) NOPASSWD: /usr/bin/nmcli con up sai-cam-ap
+admin ALL=(ALL) NOPASSWD: /usr/bin/nmcli con down sai-cam-ap
+admin ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection up sai-cam-ap
+admin ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down sai-cam-ap

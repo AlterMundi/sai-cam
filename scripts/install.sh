@@ -690,6 +690,33 @@ fi
 
 echo "✅ Permissions configured successfully"
 
+# Install sudoers configuration for WiFi AP management
+echo ""
+echo "🔐 Installing Sudoers Configuration"
+echo "-----------------------------------"
+echo "🔧 Installing sudoers file for WiFi AP management..."
+if [ -f "$PROJECT_ROOT/config/sai-cam-sudoers" ]; then
+    # Install sudoers file
+    sudo cp "$PROJECT_ROOT/config/sai-cam-sudoers" /etc/sudoers.d/sai-cam
+    sudo chmod 0440 /etc/sudoers.d/sai-cam
+    sudo chown root:root /etc/sudoers.d/sai-cam
+
+    # Validate sudoers syntax
+    echo "🧪 Validating sudoers syntax..."
+    if sudo visudo -c -f /etc/sudoers.d/sai-cam > /dev/null 2>&1; then
+        echo "✅ Sudoers configuration installed successfully"
+        echo "   User '$SYSTEM_USER' can now manage WiFi AP without password"
+    else
+        echo "❌ ERROR: Sudoers syntax validation failed"
+        echo "   Removing invalid sudoers file..."
+        sudo rm -f /etc/sudoers.d/sai-cam
+        echo "   WiFi AP control from portal will require manual sudo"
+    fi
+else
+    echo "⚠️  Sudoers template not found at $PROJECT_ROOT/config/sai-cam-sudoers"
+    echo "   WiFi AP control from portal will not work without sudo permissions"
+fi
+
 # Setup Nginx Configurations
 echo ""
 echo "🌐 Configuring Nginx Proxy"
