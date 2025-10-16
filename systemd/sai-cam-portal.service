@@ -15,7 +15,8 @@ StandardOutput=journal
 StandardError=journal
 
 # Security settings
-NoNewPrivileges=true
+# NoNewPrivileges disabled to allow sudo for WiFi AP management
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true

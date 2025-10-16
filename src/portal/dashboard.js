@@ -108,6 +108,33 @@ const BLOCKS = {
               <div class="metric-value">${wifi.interface}</div>
             </div>
           </div>
+          <div class="wifi-actions">
+            <button class="btn btn-danger" onclick="disableWifiAP()" id="disable-wifi-btn">
+              Disable WiFi AP
+            </button>
+          </div>
+        </div>
+      `;
+    }
+  },
+
+  'wifi-ap-disabled': {
+    title: 'WiFi Access Point',
+    icon: '📡',
+    order: 2,
+    detector: (status) => !status.features.wifi_ap || status.data.wifi_ap === null,
+    render: function(data) {
+      return `
+        <div class="block">
+          <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
+          <div class="wifi-status-disabled">
+            <p>WiFi Access Point is currently disabled</p>
+          </div>
+          <div class="wifi-actions">
+            <button class="btn btn-primary" onclick="enableWifiAP()" id="enable-wifi-btn">
+              Enable WiFi AP
+            </button>
+          </div>
         </div>
       `;
     }
@@ -388,6 +415,132 @@ async function renderDashboard() {
   // Fetch and update logs separately
   const logs = await fetchLogs();
   updateLogs(logs);
+}
+
+// WiFi AP control functions
+
+async function enableWifiAP() {
+  const btn = document.getElementById('enable-wifi-btn');
+  if (!btn) return;
+
+  // Disable button and show loading state
+  btn.disabled = true;
+  btn.textContent = 'Enabling...';
+  btn.classList.add('btn-loading');
+
+  try {
+    const response = await fetch('/api/wifi_ap/enable', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      // Show success message
+      showNotification('WiFi AP enabled successfully', 'success');
+
+      // Refresh dashboard after short delay
+      setTimeout(() => {
+        renderDashboard();
+      }, 2000);
+    } else {
+      // Show error message
+      const errorMsg = data.error || 'Failed to enable WiFi AP';
+      showNotification(errorMsg, 'error');
+
+      // Re-enable button
+      btn.disabled = false;
+      btn.textContent = 'Enable WiFi AP';
+      btn.classList.remove('btn-loading');
+    }
+  } catch (error) {
+    console.error('Error enabling WiFi AP:', error);
+    showNotification('Network error: Could not enable WiFi AP', 'error');
+
+    // Re-enable button
+    btn.disabled = false;
+    btn.textContent = 'Enable WiFi AP';
+    btn.classList.remove('btn-loading');
+  }
+}
+
+async function disableWifiAP() {
+  const btn = document.getElementById('disable-wifi-btn');
+  if (!btn) return;
+
+  // Confirm action
+  if (!confirm('Are you sure you want to disable the WiFi Access Point?')) {
+    return;
+  }
+
+  // Disable button and show loading state
+  btn.disabled = true;
+  btn.textContent = 'Disabling...';
+  btn.classList.add('btn-loading');
+
+  try {
+    const response = await fetch('/api/wifi_ap/disable', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      // Show success message
+      showNotification('WiFi AP disabled successfully', 'success');
+
+      // Refresh dashboard after short delay
+      setTimeout(() => {
+        renderDashboard();
+      }, 2000);
+    } else {
+      // Show error message
+      const errorMsg = data.error || 'Failed to disable WiFi AP';
+      showNotification(errorMsg, 'error');
+
+      // Re-enable button
+      btn.disabled = false;
+      btn.textContent = 'Disable WiFi AP';
+      btn.classList.remove('btn-loading');
+    }
+  } catch (error) {
+    console.error('Error disabling WiFi AP:', error);
+    showNotification('Network error: Could not disable WiFi AP', 'error');
+
+    // Re-enable button
+    btn.disabled = false;
+    btn.textContent = 'Disable WiFi AP';
+    btn.classList.remove('btn-loading');
+  }
+}
+
+function showNotification(message, type = 'info') {
+  // Create notification element
+  const notification = document.createElement('div');
+  notification.className = `notification notification-${type}`;
+  notification.textContent = message;
+
+  // Add to body
+  document.body.appendChild(notification);
+
+  // Trigger animation
+  setTimeout(() => {
+    notification.classList.add('notification-show');
+  }, 10);
+
+  // Remove after 4 seconds
+  setTimeout(() => {
+    notification.classList.remove('notification-show');
+    setTimeout(() => {
+      notification.remove();
+    }, 300);
+  }, 4000);
 }
 
 // Initialize dashboard
