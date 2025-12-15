@@ -4,7 +4,7 @@ After=network.target
 StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+Type=notify
 User=${SYSTEM_USER}
 Group=${SYSTEM_GROUP}
 WorkingDirectory=${INSTALL_DIR}
@@ -13,9 +13,12 @@ ExecStart=${INSTALL_DIR}/venv/bin/python3 ${INSTALL_DIR}/bin/camera_service.py
 Restart=always
 RestartSec=10
 
-# Basic watchdog
-WatchdogSec=30
-NotifyAccess=all
+# Systemd watchdog - service must call sd_notify("WATCHDOG=1") periodically
+WatchdogSec=60
+NotifyAccess=main
+
+# Startup timeout (time to send READY=1)
+TimeoutStartSec=120
 
 # Logging
 StandardOutput=append:${LOG_DIR}/service.log
