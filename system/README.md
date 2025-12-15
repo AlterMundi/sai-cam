@@ -12,7 +12,7 @@ System monitoring and watchdog components for long-term SAI-CAM stability.
 - **Resource Monitoring**: CPU, memory, temperature, and disk usage tracking
 - **Storage Management**: Automatic cleanup of old images
 - **Log Rotation**: Prevents log files from filling disk space
-- **Scheduled Reboot**: Weekly reboot for long-term stability (Sunday 4 AM)
+- **Scheduled Reboot**: Daily reboot for long-term stability (4 AM)
 
 ## Scheduled Tasks
 
@@ -22,9 +22,9 @@ After installation, the following cron jobs run automatically:
 |------|----------|-------------|
 | System monitor | Every 5 min | Check CPU, memory, temp, disk |
 | Service watchdog | Every 10 min | Verify services are running |
-| Storage cleanup | Daily 3 AM | Remove old images |
+| Storage cleanup | Sunday 3 AM | Remove old images |
 | Log cleanup | Sunday 2 AM | Clean old log files |
-| Weekly reboot | Sunday 4 AM | Preventive maintenance reboot |
+| Daily reboot | Daily 4 AM | Preventive maintenance reboot |
 
 ## Manual Commands
 

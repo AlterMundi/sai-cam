@@ -987,17 +987,17 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 # Service watchdog - every 10 minutes
 */10 * * * * root $INSTALL_DIR/system/monitoring/service_watchdog.sh >/dev/null 2>&1
 
-# Storage cleanup - daily at 3 AM
-0 3 * * * $SYSTEM_USER $INSTALL_DIR/system/monitoring/cleanup_storage.sh >/dev/null 2>&1
+# Storage cleanup - weekly on Sunday at 3 AM
+0 3 * * 0 $SYSTEM_USER $INSTALL_DIR/system/monitoring/cleanup_storage.sh >/dev/null 2>&1
 
 # Log cleanup - weekly on Sunday at 2 AM
 0 2 * * 0 root $INSTALL_DIR/system/monitoring/cleanup_logs.sh >/dev/null 2>&1
 
-# Scheduled weekly reboot - Sunday at 4 AM (for long-term stability)
-0 4 * * 0 root /sbin/shutdown -r +1 "Scheduled weekly maintenance reboot" >/dev/null 2>&1
+# Scheduled daily reboot - every day at 4 AM (for long-term stability)
+0 4 * * * root /sbin/shutdown -r +1 "Scheduled daily maintenance reboot" >/dev/null 2>&1
 EOF
 sudo chmod 644 "$CRON_FILE"
-echo "✅ Scheduled tasks configured (including weekly reboot at Sunday 4 AM)"
+echo "✅ Scheduled tasks configured (including daily reboot at 4 AM)"
 
 # Hardware watchdog (Raspberry Pi specific)
 if [ -e /dev/watchdog ] || modprobe bcm2835_wdt 2>/dev/null; then
@@ -1081,9 +1081,9 @@ echo "• Edit configuration: sudo nano $CONFIG_DIR/config.yaml"
 echo "• Restart services: sudo systemctl restart sai-cam sai-cam-portal"
 echo ""
 echo "📅 Scheduled Maintenance:"
-echo "  • Storage cleanup: Daily at 3 AM"
+echo "  • Storage cleanup: Weekly Sunday 3 AM"
 echo "  • Log rotation: Weekly Sunday 2 AM"
-echo "  • System reboot: Weekly Sunday 4 AM"
+echo "  • System reboot: Daily at 4 AM"
 if [ "$PRESERVE_CONFIG" = true ]; then
     echo ""
     echo "⚠️  Note: Configuration was preserved from production"
