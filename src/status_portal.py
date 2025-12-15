@@ -247,6 +247,9 @@ def get_network_info():
         for iface_name, iface_addrs in psutil.net_if_addrs().items():
             if iface_name in ['lo', 'docker0']:
                 continue
+            # Skip docker bridge networks
+            if iface_name.startswith('br-') or iface_name.startswith('veth'):
+                continue
 
             ipv4 = None
             for addr in iface_addrs:
@@ -269,9 +272,20 @@ def get_network_info():
         except:
             pass
 
+        # Get network mode from config
+        network_mode = config.get('network', {}).get('mode', 'ethernet')
+
+        # Determine WAN interface based on mode
+        if network_mode == 'wifi-client':
+            wan_interface = config.get('network', {}).get('wifi_client', {}).get('interface', 'wlan0')
+        else:
+            wan_interface = config.get('network', {}).get('interface', 'eth0')
+
         return {
             'interfaces': interfaces,
-            'upstream_online': upstream_online
+            'upstream_online': upstream_online,
+            'mode': network_mode,
+            'wan_interface': wan_interface
         }
     except Exception as e:
         logger.error(f"Error getting network info: {e}")

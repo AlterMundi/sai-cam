@@ -209,20 +209,41 @@ const BLOCKS = {
     detector: (status) => status.data.network !== null,
     render: function(data) {
       const network = data.network;
-      const interfaces = Object.entries(network.interfaces || {}).map(([name, iface]) => `
-        <div class="network-interface">
-          <div class="interface-name">${name}</div>
-          <div class="interface-ip">${iface.ip}</div>
-          <div class="interface-type">${iface.type}</div>
-        </div>
-      `).join('');
+      const mode = network.mode || 'ethernet';
+      const modeLabel = mode === 'wifi-client' ? 'WiFi Client' : 'Ethernet';
+      const modeIcon = mode === 'wifi-client' ? '📶' : '🔌';
+
+      // Sort interfaces: WAN first, then others
+      const sortedInterfaces = Object.entries(network.interfaces || {}).sort(([a], [b]) => {
+        if (a === network.wan_interface) return -1;
+        if (b === network.wan_interface) return 1;
+        return a.localeCompare(b);
+      });
+
+      const interfaces = sortedInterfaces.map(([name, iface]) => {
+        const isWan = name === network.wan_interface;
+        return `
+          <div class="network-interface ${isWan ? 'wan' : ''}">
+            <div class="interface-header">
+              <span class="interface-name">${name}</span>
+              ${isWan ? '<span class="interface-badge wan">WAN</span>' : ''}
+            </div>
+            <div class="interface-ip">${iface.ip}</div>
+            <div class="interface-type">${iface.type}</div>
+          </div>
+        `;
+      }).join('');
 
       return `
         <div class="block">
           <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
+          <div class="network-mode-banner ${mode}">
+            <span class="mode-icon">${modeIcon}</span>
+            <span class="mode-label">Mode: ${modeLabel}</span>
+          </div>
           <div class="network-status">
             <div class="metric-item">
-              <div class="metric-label">Upstream Internet</div>
+              <div class="metric-label">Internet Connection</div>
               <div class="metric-value">
                 <span class="badge ${network.upstream_online ? 'online' : 'offline'}">
                   ${network.upstream_online ? '● Online' : '○ Offline'}
@@ -353,14 +374,18 @@ async function renderDashboard() {
   // Update network info in header
   if (status.data.network) {
     const network = status.data.network;
-    // Find WAN interface (eth0 or first non-wlan interface)
-    const wanIface = Object.entries(network.interfaces || {}).find(([name]) => name === 'eth0' || !name.startsWith('wlan'));
-    const wanInfo = wanIface ? `WAN: ${wanIface[0]} (${wanIface[1].ip})` : 'WAN: --';
-    const internetStatus = network.upstream_online ? 'Internet: ✓ Online' : 'Internet: ✗ Offline';
+    const mode = network.mode || 'ethernet';
+    const modeIcon = mode === 'wifi-client' ? '📶' : '🔌';
+
+    // Use WAN interface from config
+    const wanName = network.wan_interface || 'eth0';
+    const wanIface = network.interfaces?.[wanName];
+    const wanInfo = wanIface ? `${modeIcon} ${wanName}: ${wanIface.ip}` : `${modeIcon} ${wanName}: --`;
+    const internetStatus = network.upstream_online ? '● Online' : '○ Offline';
 
     document.getElementById('wan-interface').textContent = wanInfo;
     document.getElementById('internet-status').textContent = internetStatus;
-    document.getElementById('internet-status').style.color = network.upstream_online ? '#27ae60' : '#e74c3c';
+    document.getElementById('internet-status').className = network.upstream_online ? 'status-online' : 'status-offline';
   }
 
   // Render blocks
