@@ -1,7 +1,25 @@
 #!/bin/bash
 
-# SAI-CAM System Monitoring Installation Script
-# Sets up comprehensive monitoring and watchdog for Raspberry Pi
+# DEPRECATED: Monitoring is now integrated into scripts/install.sh
+# This script is kept for reference only.
+#
+# To install monitoring, run: sudo ./scripts/install.sh
+# The main installer now handles:
+#   - Hardware watchdog setup
+#   - Cron job configuration
+#   - Log rotation
+#   - Scheduled weekly reboot
+#
+# See system/README.md for more information.
+
+echo "WARNING: This script is deprecated."
+echo "Monitoring is now installed automatically by scripts/install.sh"
+echo ""
+echo "If you need to manually reinstall monitoring, run:"
+echo "  sudo ./scripts/install.sh --preserve-config"
+exit 0
+
+# --- DEPRECATED CODE BELOW ---
 
 set -e
 
