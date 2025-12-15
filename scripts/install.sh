@@ -958,6 +958,104 @@ else
     echo "   Check logs: sudo journalctl -u sai-cam-portal -n 20"
 fi
 
+# System Monitoring Setup
+echo ""
+echo "🔧 Setting Up System Monitoring"
+echo "--------------------------------"
+
+# Copy monitoring scripts
+if [ -d "$PROJECT_ROOT/system/monitoring" ]; then
+    echo "📋 Installing monitoring scripts..."
+    sudo mkdir -p $INSTALL_DIR/system/monitoring
+    sudo mkdir -p $INSTALL_DIR/system/config
+    sudo cp -r $PROJECT_ROOT/system/monitoring/* $INSTALL_DIR/system/monitoring/
+    sudo cp -r $PROJECT_ROOT/system/config/* $INSTALL_DIR/system/config/
+    sudo chmod +x $INSTALL_DIR/system/monitoring/*.sh
+fi
+
+# Setup cron jobs for monitoring and scheduled maintenance
+echo "⏰ Setting up scheduled tasks..."
+CRON_FILE="/etc/cron.d/sai-cam"
+sudo tee "$CRON_FILE" > /dev/null << EOF
+# SAI-CAM System Monitoring and Maintenance
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# System monitoring - every 5 minutes
+*/5 * * * * $SYSTEM_USER $INSTALL_DIR/system/monitoring/system_monitor.sh >/dev/null 2>&1
+
+# Service watchdog - every 10 minutes
+*/10 * * * * root $INSTALL_DIR/system/monitoring/service_watchdog.sh >/dev/null 2>&1
+
+# Storage cleanup - daily at 3 AM
+0 3 * * * $SYSTEM_USER $INSTALL_DIR/system/monitoring/cleanup_storage.sh >/dev/null 2>&1
+
+# Log cleanup - weekly on Sunday at 2 AM
+0 2 * * 0 root $INSTALL_DIR/system/monitoring/cleanup_logs.sh >/dev/null 2>&1
+
+# Scheduled weekly reboot - Sunday at 4 AM (for long-term stability)
+0 4 * * 0 root /sbin/shutdown -r +1 "Scheduled weekly maintenance reboot" >/dev/null 2>&1
+EOF
+sudo chmod 644 "$CRON_FILE"
+echo "✅ Scheduled tasks configured (including weekly reboot at Sunday 4 AM)"
+
+# Hardware watchdog (Raspberry Pi specific)
+if [ -e /dev/watchdog ] || modprobe bcm2835_wdt 2>/dev/null; then
+    echo "🐕 Configuring hardware watchdog..."
+
+    # Ensure module loads on boot
+    if ! grep -q "bcm2835_wdt" /etc/modules-load.d/*.conf 2>/dev/null; then
+        echo "bcm2835_wdt" | sudo tee /etc/modules-load.d/watchdog.conf > /dev/null
+    fi
+
+    # Install watchdog daemon if not present
+    if ! command -v watchdog &> /dev/null; then
+        sudo apt-get install -y watchdog > /dev/null 2>&1 || true
+    fi
+
+    # Configure watchdog if installed
+    if [ -f "$INSTALL_DIR/system/config/watchdog.conf" ]; then
+        sudo cp "$INSTALL_DIR/system/config/watchdog.conf" /etc/watchdog.conf
+        sudo systemctl enable watchdog 2>/dev/null || true
+        sudo systemctl restart watchdog 2>/dev/null || true
+        echo "✅ Hardware watchdog enabled (15s timeout)"
+    fi
+else
+    echo "ℹ️  Hardware watchdog not available (not a Raspberry Pi?)"
+fi
+
+# Create health check script
+echo "📊 Creating health check script..."
+sudo tee "$INSTALL_DIR/check_health.sh" > /dev/null << 'HEALTHSCRIPT'
+#!/bin/bash
+echo "SAI-CAM System Health Check"
+echo "==========================="
+echo
+
+echo "System Resources:"
+echo "-----------------"
+if command -v vcgencmd &> /dev/null; then
+    echo "Temperature: $(vcgencmd measure_temp | cut -d= -f2)"
+fi
+echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | awk '{print $2+$4}')%"
+echo "Memory: $(free -h | grep Mem | awk '{print $3 "/" $2}')"
+echo "Disk: $(df -h /opt/sai-cam | tail -1 | awk '{print $3 "/" $2 " (" $5 ")"}')"
+echo
+
+echo "Services Status:"
+echo "----------------"
+systemctl is-active sai-cam > /dev/null && echo "✓ sai-cam: running" || echo "✗ sai-cam: stopped"
+systemctl is-active sai-cam-portal > /dev/null && echo "✓ portal: running" || echo "✗ portal: stopped"
+systemctl is-active watchdog > /dev/null && echo "✓ watchdog: running" || echo "✗ watchdog: not running"
+echo
+
+echo "Storage:"
+echo "--------"
+du -sh /opt/sai-cam/storage 2>/dev/null || echo "No storage data"
+HEALTHSCRIPT
+sudo chmod +x "$INSTALL_DIR/check_health.sh"
+echo "✅ Health check: $INSTALL_DIR/check_health.sh"
+
 echo ""
 if [ "$PRESERVE_CONFIG" = true ]; then
     echo "🎉 SAI-CAM Code Update Completed!"
@@ -977,11 +1075,15 @@ echo ""
 echo "🔍 Next Steps:"
 echo "--------------"
 echo "• Access status portal: http://$(hostname -I | awk '{print $1}')/"
+echo "• Check system health: $INSTALL_DIR/check_health.sh"
 echo "• Check service logs: sudo journalctl -u sai-cam -f"
-echo "• Check portal logs: sudo journalctl -u sai-cam-portal -f"
 echo "• Edit configuration: sudo nano $CONFIG_DIR/config.yaml"
 echo "• Restart services: sudo systemctl restart sai-cam sai-cam-portal"
-echo "• View camera feeds: Check Nginx proxy configuration (ports 8080+)"
+echo ""
+echo "📅 Scheduled Maintenance:"
+echo "  • Storage cleanup: Daily at 3 AM"
+echo "  • Log rotation: Weekly Sunday 2 AM"
+echo "  • System reboot: Weekly Sunday 4 AM"
 if [ "$PRESERVE_CONFIG" = true ]; then
     echo ""
     echo "⚠️  Note: Configuration was preserved from production"
