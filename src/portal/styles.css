@@ -117,6 +117,16 @@ header {
   background: rgba(255, 255, 255, 0.25);
 }
 
+#network-info .status-online {
+  background: rgba(39, 174, 96, 0.3);
+  color: #a8e6cf;
+}
+
+#network-info .status-offline {
+  background: rgba(231, 76, 60, 0.3);
+  color: #ffb3b3;
+}
+
 #last-update {
   font-size: 0.9em;
   opacity: 0.75;
@@ -465,8 +475,38 @@ main {
 
 /* Network */
 
+.network-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+
+.network-mode-banner.ethernet {
+  background: linear-gradient(135deg, #3498db15 0%, #2980b915 100%);
+  border: 1px solid #3498db40;
+  color: #2980b9;
+}
+
+.network-mode-banner.wifi-client {
+  background: linear-gradient(135deg, #9b59b615 0%, #8e44ad15 100%);
+  border: 1px solid #9b59b640;
+  color: #8e44ad;
+}
+
+.network-mode-banner .mode-icon {
+  font-size: 1.2em;
+}
+
+.network-mode-banner .mode-label {
+  font-size: 0.95em;
+}
+
 .network-status {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .network-interfaces {
@@ -475,12 +515,26 @@ main {
 }
 
 .network-interface {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
-  padding: 12px;
+  gap: 12px;
+  padding: 12px 14px;
   background: var(--bg-color);
   border-radius: 6px;
+  border: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.network-interface.wan {
+  border-color: var(--success-color);
+  background: linear-gradient(135deg, #27ae6008 0%, #27ae6012 100%);
+}
+
+.interface-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .interface-name {
@@ -488,15 +542,31 @@ main {
   color: var(--primary-color);
 }
 
+.interface-badge {
+  font-size: 0.65em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.interface-badge.wan {
+  background: var(--success-color);
+  color: white;
+}
+
 .interface-ip {
-  font-family: monospace;
-  color: var(--text-secondary);
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--text-primary);
 }
 
 .interface-type {
-  font-size: 0.8em;
+  font-size: 0.75em;
   color: var(--text-secondary);
   text-transform: uppercase;
+  font-weight: 500;
 }
 
 /* Logs */
@@ -645,9 +715,14 @@ footer p {
   }
 
   .network-interface {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .network-mode-banner {
     flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+    text-align: center;
+    gap: 6px;
   }
 }
 

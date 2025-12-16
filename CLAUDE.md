@@ -41,8 +41,8 @@ All cameras implement: `setup()`, `capture_frame()`, `reconnect()`, `cleanup()`,
 # Full installation (requires sudo, used for deployment)
 sudo ./scripts/install.sh
 
-# Configuration-only update (updates /etc/sai-cam/config.yaml)
-sudo ./scripts/install.sh --config-only
+# Code update preserving production config
+sudo ./scripts/install.sh --preserve-config
 
 # Install Python dependencies
 pip3 install -r requirements.txt
@@ -115,8 +115,8 @@ See [config/config.yaml](config/config.yaml) for complete example with 6 cameras
 
 1. Test changes locally first with `--config` and `--local-save` flags
 2. Changes to [src/](src/) are deployed by copying to `/opt/sai-cam/`
-3. Config changes require `sudo ./scripts/install.sh --config-only` or full reinstall
-4. Service restarts automatically pick up code changes if properly deployed
+3. Use `--preserve-config` to update code without overwriting production config
+4. Config changes on deployed nodes: edit `/etc/sai-cam/config.yaml` directly + restart service
 
 The install script handles:
 

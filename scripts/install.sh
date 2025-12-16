@@ -2,7 +2,6 @@
 set -e
 
 # Default values
-CONFIG_ONLY=false
 PRESERVE_CONFIG=false
 
 # Function to display help information
@@ -13,23 +12,18 @@ SAI-CAM Installation Script
 
 DESCRIPTION:
     This script installs and configures the SAI-CAM (Smart AI Camera) system
-    on Linux systems. It supports both full installation and configuration-only
-    updates for existing deployments.
+    on Linux systems.
 
 USAGE:
     sudo ./install.sh [OPTIONS]
 
 OPTIONS:
-    -c, --config-only         Update configuration files only (no code/system changes)
     -p, --preserve-config     Update code only, preserve existing configuration
     -h, --help               Show this help message and exit
 
 EXAMPLES:
     # Full installation (requires sudo)
     sudo ./install.sh
-
-    # Update configuration only
-    sudo ./install.sh --config-only
 
     # Update code and preserve production configuration
     sudo ./install.sh --preserve-config
@@ -45,7 +39,7 @@ REQUIREMENTS:
 
 WHAT THIS SCRIPT DOES:
 
-Full Installation (-c flag NOT used):
+Full Installation:
     1. Network Configuration:
        - Configures static IP and network interface (if specified in config.yaml)
        - Creates NetworkManager connection profile
@@ -66,13 +60,10 @@ Full Installation (-c flag NOT used):
        - Enables and starts systemd services
        - Configures automatic startup on boot
 
-Configuration-Only Update (-c flag used):
-    1. Backs up existing configuration
-    2. Updates config.yaml file only
-    3. Preserves all system settings and services
-    4. Suggests service restart if needed
+    NOTE: If a production config exists at /etc/sai-cam/config.yaml and differs
+    from the repository config, you will be prompted to choose which to keep.
 
-Code-Only Update (-p flag used):
+Code-Only Update (-p flag):
     1. Backs up existing files
     2. Updates all code files (camera_service.py, camera modules, etc.)
     3. Updates systemd service, nginx proxy, and logrotate configs
@@ -132,10 +123,6 @@ EOF
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -c|--config-only)
-            CONFIG_ONLY=true
-            shift
-            ;;
         -p|--preserve-config)
             PRESERVE_CONFIG=true
             shift
@@ -154,18 +141,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate that mutually exclusive flags aren't both set
-if [ "$CONFIG_ONLY" = true ] && [ "$PRESERVE_CONFIG" = true ]; then
-    echo "❌ ERROR: --config-only and --preserve-config are mutually exclusive"
-    echo ""
-    echo "Choose one:"
-    echo "  --config-only      : Update configuration only (no code changes)"
-    echo "  --preserve-config  : Update code only (preserve configuration)"
-    echo ""
-    echo "Try '$0 --help' for more information."
-    exit 1
-fi
-
 # Internal variables for system maintenance (not user-configurable)
 INSTALL_DIR="/opt/sai-cam"
 CONFIG_DIR="/etc/sai-cam"
@@ -174,7 +149,7 @@ BACKUP_DIR="/var/backups/sai-cam"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 # System packages required for installation
-SYSTEM_PACKAGES="python3-pip python3-opencv python3-venv libsystemd-dev nginx"
+SYSTEM_PACKAGES="python3-pip python3-opencv python3-venv libsystemd-dev nginx gettext-base"
 
 # Default system user (can be overridden by config.yaml)
 DEFAULT_USER="admin"
@@ -202,7 +177,7 @@ read_config_value() {
                 grep -E "^\s*node_ip:" "$config_file" | sed 's/.*node_ip:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
             "network.interface")
-                grep -E "^\s*interface:" "$config_file" | sed 's/.*interface:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
+                grep -E "^\s*interface:" "$config_file" | head -1 | sed 's/.*interface:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
             "network.connection_name")
                 grep -E "^\s*connection_name:" "$config_file" | sed 's/.*connection_name:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
@@ -305,6 +280,12 @@ EOF
 NODE_IP=$(read_config_value "network.node_ip" "$DEFAULT_NODE_IP")
 INTERFACE=$(read_config_value "network.interface" "$DEFAULT_INTERFACE")
 CONNECTION_NAME=$(read_config_value "network.connection_name" "$DEFAULT_CONNECTION_NAME")
+NETWORK_MODE=$(read_config_value "network.mode" "ethernet")
+NETWORK_GATEWAY=$(read_config_value "network.gateway" "")
+WIFI_CLIENT_SSID=$(read_config_value "network.wifi_client.ssid" "")
+WIFI_CLIENT_PASSWORD=$(read_config_value "network.wifi_client.password" "")
+WIFI_CLIENT_INTERFACE=$(read_config_value "network.wifi_client.wifi_iface" "wlan0")
+WIFI_COUNTRY_CODE=$(read_config_value "wifi_ap.country_code" "AR")
 SYSTEM_USER=$(read_config_value "system.user" "$DEFAULT_USER")
 SYSTEM_GROUP=$(read_config_value "system.group" "$DEFAULT_GROUP")
 
@@ -312,16 +293,13 @@ SYSTEM_GROUP=$(read_config_value "system.group" "$DEFAULT_GROUP")
 check_required_files() {
     local required_files=()
 
-    if [ "$CONFIG_ONLY" = true ]; then
-        required_files=(
-            "$PROJECT_ROOT/config/config.yaml"
-        )
-    elif [ "$PRESERVE_CONFIG" = true ]; then
+    if [ "$PRESERVE_CONFIG" = true ]; then
         # For preserve-config mode, we need code files but not config
         required_files=(
             "$PROJECT_ROOT/src/camera_service.py"
             "$PROJECT_ROOT/config/camera-proxy"
-            "$PROJECT_ROOT/systemd/sai-cam.service"
+            "$PROJECT_ROOT/systemd/sai-cam.service.template"
+            "$PROJECT_ROOT/systemd/sai-cam-portal.service.template"
             "$PROJECT_ROOT/systemd/logrotate.conf"
             "$PROJECT_ROOT/requirements.txt"
         )
@@ -331,7 +309,8 @@ check_required_files() {
             "$PROJECT_ROOT/src/camera_service.py"
             "$PROJECT_ROOT/config/config.yaml"
             "$PROJECT_ROOT/config/camera-proxy"
-            "$PROJECT_ROOT/systemd/sai-cam.service"
+            "$PROJECT_ROOT/systemd/sai-cam.service.template"
+            "$PROJECT_ROOT/systemd/sai-cam-portal.service.template"
             "$PROJECT_ROOT/systemd/logrotate.conf"
             "$PROJECT_ROOT/requirements.txt"
         )
@@ -358,8 +337,80 @@ check_required_files() {
     echo "✅ All required files found"
 }
 
-# Function to backup existing config
+# Function to validate config.yaml structure and required fields
+validate_config() {
+    local config_file="$PROJECT_ROOT/config/config.yaml"
 
+    # Skip validation in preserve-config mode (we're not using repo config)
+    if [ "$PRESERVE_CONFIG" = true ]; then
+        echo "ℹ️  Config validation skipped (--preserve-config mode)"
+        return 0
+    fi
+
+    echo "🔍 Validating configuration..."
+
+    # Use Python to validate YAML syntax and required fields
+    python3 << EOF
+import sys
+import yaml
+
+config_file = "$config_file"
+errors = []
+
+try:
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+except yaml.YAMLError as e:
+    print(f"❌ YAML syntax error: {e}")
+    sys.exit(1)
+except FileNotFoundError:
+    print(f"❌ Config file not found: {config_file}")
+    sys.exit(1)
+
+# Check required fields
+if not config:
+    errors.append("Config file is empty")
+else:
+    # Check device.id
+    if 'device' not in config or not config.get('device', {}).get('id'):
+        errors.append("Missing required field: device.id")
+
+    # Check cameras array
+    cameras = config.get('cameras', [])
+    if not cameras:
+        errors.append("No cameras defined (cameras array is empty)")
+    else:
+        print(f"   ✓ Found {len(cameras)} camera(s) configured")
+
+    # Check server.url
+    if 'server' not in config or not config.get('server', {}).get('url'):
+        errors.append("Missing required field: server.url")
+
+    # Print device info if available
+    device_id = config.get('device', {}).get('id', 'unknown')
+    location = config.get('device', {}).get('location', 'unknown')
+    print(f"   ✓ Device: {device_id} @ {location}")
+
+if errors:
+    print("")
+    for error in errors:
+        print(f"❌ {error}")
+    print("")
+    print("Please fix config/config.yaml before running install.")
+    sys.exit(1)
+else:
+    print("✅ Configuration is valid")
+    sys.exit(0)
+EOF
+
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "❌ Installation aborted due to configuration errors"
+        exit 1
+    fi
+}
+
+# Function to backup existing config
 backup_existing_config() {
     if [ -d "$CONFIG_DIR" ] || [ -f "/etc/systemd/system/sai-cam.service" ] || [ -f "/etc/logrotate.d/sai-cam" ]; then
         echo "📦 Creating backup of existing installation..."
@@ -373,26 +424,24 @@ backup_existing_config() {
             echo "✅ Configuration backup created at: $BACKUP_DIR/$TIMESTAMP/config/"
         fi
 
-        if [ "$CONFIG_ONLY" = false ]; then
-            # Backup systemd service file if it exists
-            if [ -f "/etc/systemd/system/sai-cam.service" ]; then
-                sudo cp "/etc/systemd/system/sai-cam.service" "$BACKUP_DIR/$TIMESTAMP/systemd/"
-                echo "✅ Service file backup created: sai-cam.service"
-            fi
+        # Backup systemd service file if it exists
+        if [ -f "/etc/systemd/system/sai-cam.service" ]; then
+            sudo cp "/etc/systemd/system/sai-cam.service" "$BACKUP_DIR/$TIMESTAMP/systemd/"
+            echo "✅ Service file backup created: sai-cam.service"
+        fi
 
-            # Backup logrotate config if it exists
-            if [ -f "/etc/logrotate.d/sai-cam" ]; then
-                sudo cp "/etc/logrotate.d/sai-cam" "$BACKUP_DIR/$TIMESTAMP/logrotate/"
-                echo "✅ Logrotate config backup created: sai-cam"
-            fi
+        # Backup logrotate config if it exists
+        if [ -f "/etc/logrotate.d/sai-cam" ]; then
+            sudo cp "/etc/logrotate.d/sai-cam" "$BACKUP_DIR/$TIMESTAMP/logrotate/"
+            echo "✅ Logrotate config backup created: sai-cam"
+        fi
 
-            # Backup existing code if preserve-config mode
-            if [ "$PRESERVE_CONFIG" = true ] && [ -d "$INSTALL_DIR/bin" ]; then
-                sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/code"
-                sudo cp -r "$INSTALL_DIR/bin" "$BACKUP_DIR/$TIMESTAMP/code/" 2>/dev/null || true
-                sudo cp -r "$INSTALL_DIR/cameras" "$BACKUP_DIR/$TIMESTAMP/code/" 2>/dev/null || true
-                echo "✅ Code backup created at: $BACKUP_DIR/$TIMESTAMP/code/"
-            fi
+        # Backup existing code if preserve-config mode
+        if [ "$PRESERVE_CONFIG" = true ] && [ -d "$INSTALL_DIR/bin" ]; then
+            sudo mkdir -p "$BACKUP_DIR/$TIMESTAMP/code"
+            sudo cp -r "$INSTALL_DIR/bin" "$BACKUP_DIR/$TIMESTAMP/code/" 2>/dev/null || true
+            sudo cp -r "$INSTALL_DIR/cameras" "$BACKUP_DIR/$TIMESTAMP/code/" 2>/dev/null || true
+            echo "✅ Code backup created at: $BACKUP_DIR/$TIMESTAMP/code/"
         fi
         
         echo "💾 Complete backup location: $BACKUP_DIR/$TIMESTAMP/"
@@ -415,59 +464,100 @@ echo "=============================="
 echo "📋 Checking for required files..."
 check_required_files
 
+# Validate config.yaml if possible (requires python3 + pyyaml)
+if python3 -c "import yaml" 2>/dev/null; then
+    validate_config
+else
+    echo "⚠️  Config validation skipped (PyYAML not installed yet)"
+    echo "   Config will be validated after Python packages are installed"
+fi
+
 # Create backup of existing installation
 echo "💾 Checking for existing configuration..."
 backup_existing_config
 
-if [ "$CONFIG_ONLY" = true ]; then
-    echo "⚙️  Configuration-only update mode"
-    echo "-----------------------------------"
-    sudo mkdir -p $CONFIG_DIR
-    sudo chown $SYSTEM_USER:$SYSTEM_GROUP $CONFIG_DIR
-    sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
-    sudo chmod 644 $CONFIG_DIR/config.yaml
-    echo "✅ Configuration updated successfully!"
-    
-    if systemctl is-active --quiet sai-cam; then
-        echo ""
-        echo "ℹ️  NOTE: The sai-cam service is running."
-        echo "   To apply the new configuration, restart the service:"
-        echo "   sudo systemctl restart sai-cam"
-    fi
-    echo ""
-    echo "🎉 Configuration update completed!"
-    exit 0
-fi
-
-# Continue with full installation if not config-only
-echo "🔧 Starting full SAI-CAM installation..."
+echo "🔧 Starting SAI-CAM installation..."
 echo "========================================"
 
 # Network configuration from config.yaml:
 echo ""
 echo "🌐 Network Configuration"
 echo "------------------------"
+echo "Mode:       ${NETWORK_MODE:-'ethernet'}"
 echo "Connection: ${CONNECTION_NAME:-'(not specified)'}"
 echo "Interface:  ${INTERFACE:-'(not specified)'}"
 echo "IP Address: ${NODE_IP:-'(not specified)'}"
 
+# Configure WiFi regulatory domain (required before any WiFi operations)
+echo "📡 Setting WiFi regulatory domain to $WIFI_COUNTRY_CODE..."
+# On Raspberry Pi OS, use raspi-config (required to unblock WiFi on fresh installs)
+if command -v raspi-config &> /dev/null; then
+    sudo raspi-config nonint do_wifi_country "$WIFI_COUNTRY_CODE" 2>/dev/null || true
+else
+    sudo iw reg set "$WIFI_COUNTRY_CODE" 2>/dev/null || true
+    # Persist regulatory domain on non-RPi systems
+    if [ -f /etc/default/crda ]; then
+        sudo sed -i "s/^REGDOMAIN=.*/REGDOMAIN=$WIFI_COUNTRY_CODE/" /etc/default/crda 2>/dev/null || true
+    fi
+fi
+
+# Unblock WiFi radio (required on fresh installations)
+echo "📡 Unblocking WiFi radio..."
+sudo rfkill unblock wifi 2>/dev/null || true
+
 # Only configure network if values are provided and non-empty
 if [ -n "$CONNECTION_NAME" ] && [ -n "$INTERFACE" ] && [ -n "$NODE_IP" ]; then
     echo "⚙️  Setting up network connection..."
-    
+
     # Check if connection already exists and delete it
     if nmcli con show "$CONNECTION_NAME" >/dev/null 2>&1; then
         echo "🗑️  Removing existing connection: $CONNECTION_NAME"
         sudo nmcli con delete "$CONNECTION_NAME"
     fi
-    
-    # Create new connection with DHCP primary and static IP secondary
-    echo "🔧 Creating network connection with DHCP + static IP..."
-    sudo nmcli con add con-name "$CONNECTION_NAME" ifname "$INTERFACE" type ethernet ipv4.method auto ipv4.addresses "$NODE_IP"
-    
-    echo "🔌 Activating network connection..."
+
+    if [ "$NETWORK_MODE" = "wifi-client" ]; then
+        # WiFi-client mode: Ethernet is static only (for cameras), WiFi provides internet
+        echo "🔧 Creating ethernet connection with static IP (wifi-client mode)..."
+        sudo nmcli con add con-name "$CONNECTION_NAME" ifname "$INTERFACE" type ethernet \
+            ipv4.method manual ipv4.addresses "$NODE_IP"
+
+        # Configure WiFi client for internet access
+        if [ -n "$WIFI_CLIENT_SSID" ] && [ -n "$WIFI_CLIENT_PASSWORD" ]; then
+            echo "📶 Configuring WiFi client connection..."
+            # Remove existing WiFi client connection if exists
+            if nmcli con show "sai-cam-wifi" >/dev/null 2>&1; then
+                sudo nmcli con delete "sai-cam-wifi"
+            fi
+            sudo nmcli con add con-name "sai-cam-wifi" type wifi ifname "$WIFI_CLIENT_INTERFACE" \
+                ssid "$WIFI_CLIENT_SSID" \
+                wifi-sec.key-mgmt wpa-psk \
+                wifi-sec.psk "$WIFI_CLIENT_PASSWORD" \
+                connection.autoconnect yes \
+                connection.autoconnect-priority 100
+            echo "🔌 Activating WiFi client connection..."
+            sudo nmcli con up "sai-cam-wifi" || echo "⚠️  WiFi connection created but failed to activate (may need manual intervention)"
+        else
+            echo "⚠️  WiFi client mode selected but no SSID/password configured"
+            echo "   Configure wifi_client.ssid and wifi_client.password in config.yaml"
+        fi
+    else
+        # Ethernet mode: Ethernet provides internet via DHCP (or static gateway if specified)
+        if [ -n "$NETWORK_GATEWAY" ]; then
+            # Static configuration with gateway
+            echo "🔧 Creating ethernet connection with static IP and gateway..."
+            sudo nmcli con add con-name "$CONNECTION_NAME" ifname "$INTERFACE" type ethernet \
+                ipv4.method manual ipv4.addresses "$NODE_IP" ipv4.gateway "$NETWORK_GATEWAY"
+        else
+            # DHCP with additional static IP
+            echo "🔧 Creating ethernet connection with DHCP + static IP..."
+            sudo nmcli con add con-name "$CONNECTION_NAME" ifname "$INTERFACE" type ethernet \
+                ipv4.method auto ipv4.addresses "$NODE_IP"
+        fi
+    fi
+
+    echo "🔌 Activating ethernet connection..."
     sudo nmcli con up "$CONNECTION_NAME"
-    
+
     echo "✅ Network configuration completed successfully"
 else
     echo "⚠️  Network configuration skipped"
@@ -520,6 +610,57 @@ if ! $INSTALL_DIR/venv/bin/pip3 install -r $PROJECT_ROOT/requirements.txt; then
 fi
 echo "✅ Python environment configured successfully"
 
+# Validate config now that PyYAML is available (if not already validated)
+if ! python3 -c "import yaml" 2>/dev/null; then
+    echo ""
+    echo "🔍 Running config validation..."
+    # Use venv python which has PyYAML
+    $INSTALL_DIR/venv/bin/python3 << EOF
+import sys
+import yaml
+
+config_file = "$PROJECT_ROOT/config/config.yaml"
+errors = []
+
+try:
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+except yaml.YAMLError as e:
+    print(f"❌ YAML syntax error: {e}")
+    sys.exit(1)
+except FileNotFoundError:
+    print(f"❌ Config file not found: {config_file}")
+    sys.exit(1)
+
+if not config:
+    errors.append("Config file is empty")
+else:
+    if 'device' not in config or not config.get('device', {}).get('id'):
+        errors.append("Missing required field: device.id")
+    cameras = config.get('cameras', [])
+    if not cameras:
+        errors.append("No cameras defined")
+    else:
+        print(f"   ✓ Found {len(cameras)} camera(s) configured")
+    if 'server' not in config or not config.get('server', {}).get('url'):
+        errors.append("Missing required field: server.url")
+    device_id = config.get('device', {}).get('id', 'unknown')
+    location = config.get('device', {}).get('location', 'unknown')
+    print(f"   ✓ Device: {device_id} @ {location}")
+
+if errors:
+    for error in errors:
+        print(f"❌ {error}")
+    print("Please fix config/config.yaml before continuing.")
+    sys.exit(1)
+print("✅ Configuration is valid")
+EOF
+    if [ $? -ne 0 ]; then
+        echo "❌ Installation aborted due to configuration errors"
+        exit 1
+    fi
+fi
+
 # Copy files
 echo ""
 echo "📋 Installing Service Files"
@@ -561,16 +702,63 @@ if [ "$PRESERVE_CONFIG" = true ]; then
         sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
     fi
 else
-    # Normal mode or config-only mode - install/update config
-    sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
+    # Normal mode - check if production config exists and differs
+    if [ -f "$CONFIG_DIR/config.yaml" ]; then
+        # Compare configs (ignore whitespace differences)
+        if ! diff -q -B "$PROJECT_ROOT/config/config.yaml" "$CONFIG_DIR/config.yaml" > /dev/null 2>&1; then
+            echo ""
+            echo "⚠️  Configuration Conflict Detected"
+            echo "   Repository config differs from deployed config at $CONFIG_DIR/config.yaml"
+            echo ""
+            echo "   Options:"
+            echo "   [1] Keep production config (preserve deployed settings)"
+            echo "   [2] Overwrite with repository config (use repo version)"
+            echo "   [3] Show diff (view differences first)"
+            echo ""
+            while true; do
+                read -p "   Choose [1/2/3]: " config_choice
+                case $config_choice in
+                    1)
+                        echo "ℹ️  Keeping existing production configuration"
+                        break
+                        ;;
+                    2)
+                        echo "📋 Overwriting with repository configuration..."
+                        sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
+                        break
+                        ;;
+                    3)
+                        echo ""
+                        echo "--- Differences (production vs repository) ---"
+                        diff --color=auto -u "$CONFIG_DIR/config.yaml" "$PROJECT_ROOT/config/config.yaml" | head -50 || true
+                        echo "--- End of diff (first 50 lines) ---"
+                        echo ""
+                        ;;
+                    *)
+                        echo "   Invalid choice. Please enter 1, 2, or 3."
+                        ;;
+                esac
+            done
+        else
+            echo "ℹ️  Configs are identical, no update needed"
+        fi
+    else
+        # No existing config, install from repo
+        echo "📋 Installing configuration from repository..."
+        sudo cp $PROJECT_ROOT/config/config.yaml $CONFIG_DIR/
+    fi
 fi
 
 echo "🌐 Installing Nginx proxy configuration..."
 generate_camera_proxy_config
 
 echo "🔧 Installing systemd services..."
-sudo cp $PROJECT_ROOT/systemd/sai-cam.service /etc/systemd/system/sai-cam.service
-sudo cp $PROJECT_ROOT/systemd/sai-cam-portal.service /etc/systemd/system/sai-cam-portal.service
+# Export variables for envsubst template processing
+export SYSTEM_USER SYSTEM_GROUP INSTALL_DIR CONFIG_DIR LOG_DIR
+# Generate service files from templates
+envsubst < $PROJECT_ROOT/systemd/sai-cam.service.template | sudo tee /etc/systemd/system/sai-cam.service > /dev/null
+envsubst < $PROJECT_ROOT/systemd/sai-cam-portal.service.template | sudo tee /etc/systemd/system/sai-cam-portal.service > /dev/null
+echo "   User: $SYSTEM_USER, Group: $SYSTEM_GROUP"
 
 echo "📝 Installing log rotation configuration..."
 sudo cp $PROJECT_ROOT/systemd/logrotate.conf /etc/logrotate.d/sai-cam
@@ -580,7 +768,13 @@ echo "✅ Service files installed successfully"
 echo ""
 echo "📡 Checking WiFi Access Point Support"
 echo "-------------------------------------"
-if iw dev wlan0 info > /dev/null 2>&1; then
+
+# Skip WiFi AP if in wifi-client mode (same interface can't be client and AP)
+if [ "$NETWORK_MODE" = "wifi-client" ]; then
+    echo "⊘ WiFi AP skipped: network mode is 'wifi-client'"
+    echo "   The WiFi interface is used for internet connectivity"
+    echo "   WiFi AP requires a second WiFi interface (e.g., USB WiFi adapter)"
+elif iw dev wlan0 info > /dev/null 2>&1; then
     echo "✅ WiFi hardware detected (wlan0)"
 
     # Generate WiFi AP configuration from config.yaml
@@ -796,6 +990,113 @@ else
     echo "   Check logs: sudo journalctl -u sai-cam-portal -n 20"
 fi
 
+# System Monitoring Setup
+echo ""
+echo "🔧 Setting Up System Monitoring"
+echo "--------------------------------"
+
+# Copy monitoring scripts
+if [ -d "$PROJECT_ROOT/system/monitoring" ]; then
+    echo "📋 Installing monitoring scripts..."
+    sudo mkdir -p $INSTALL_DIR/system/monitoring
+    sudo mkdir -p $INSTALL_DIR/system/config
+    sudo cp -r $PROJECT_ROOT/system/monitoring/* $INSTALL_DIR/system/monitoring/
+    sudo cp -r $PROJECT_ROOT/system/config/* $INSTALL_DIR/system/config/
+    sudo chmod +x $INSTALL_DIR/system/monitoring/*.sh
+fi
+
+# Setup cron jobs for monitoring and scheduled maintenance
+echo "⏰ Setting up scheduled tasks..."
+CRON_FILE="/etc/cron.d/sai-cam"
+sudo tee "$CRON_FILE" > /dev/null << EOF
+# SAI-CAM System Monitoring and Maintenance
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# System monitoring - every 5 minutes
+*/5 * * * * $SYSTEM_USER $INSTALL_DIR/system/monitoring/system_monitor.sh >/dev/null 2>&1
+
+# Service watchdog - every 10 minutes
+*/10 * * * * root $INSTALL_DIR/system/monitoring/service_watchdog.sh >/dev/null 2>&1
+
+# Storage cleanup - weekly on Sunday at 3 AM
+0 3 * * 0 $SYSTEM_USER $INSTALL_DIR/system/monitoring/cleanup_storage.sh >/dev/null 2>&1
+
+# Log cleanup - weekly on Sunday at 2 AM
+0 2 * * 0 root $INSTALL_DIR/system/monitoring/cleanup_logs.sh >/dev/null 2>&1
+
+# Scheduled daily reboot - every day at 4 AM (for long-term stability)
+0 4 * * * root /sbin/shutdown -r +1 "Scheduled daily maintenance reboot" >/dev/null 2>&1
+EOF
+sudo chmod 644 "$CRON_FILE"
+echo "✅ Scheduled tasks configured (including daily reboot at 4 AM)"
+
+# Hardware watchdog (Raspberry Pi specific)
+if [ -e /dev/watchdog ] || modprobe bcm2835_wdt 2>/dev/null; then
+    echo "🐕 Configuring hardware watchdog..."
+
+    # Ensure module loads on boot
+    if ! grep -q "bcm2835_wdt" /etc/modules-load.d/*.conf 2>/dev/null; then
+        echo "bcm2835_wdt" | sudo tee /etc/modules-load.d/watchdog.conf > /dev/null
+    fi
+
+    # Install watchdog daemon if not present
+    if ! command -v watchdog &> /dev/null; then
+        sudo apt-get install -y watchdog > /dev/null 2>&1 || true
+    fi
+
+    # Configure watchdog if installed
+    if [ -f "$INSTALL_DIR/system/config/watchdog.conf" ]; then
+        sudo cp "$INSTALL_DIR/system/config/watchdog.conf" /etc/watchdog.conf
+        sudo systemctl enable watchdog 2>/dev/null || true
+        # Stop first, wait, then start (avoid restart race condition)
+        sudo systemctl stop watchdog 2>/dev/null || true
+        sleep 2
+        sudo systemctl start watchdog 2>/dev/null || true
+        sleep 1
+        if systemctl is-active watchdog > /dev/null 2>&1; then
+            echo "✅ Hardware watchdog enabled (15s timeout)"
+        else
+            echo "⚠️  Hardware watchdog configured but failed to start"
+            echo "   Try manually: sudo systemctl start watchdog"
+        fi
+    fi
+else
+    echo "ℹ️  Hardware watchdog not available (not a Raspberry Pi?)"
+fi
+
+# Create health check script
+echo "📊 Creating health check script..."
+sudo tee "$INSTALL_DIR/check_health.sh" > /dev/null << 'HEALTHSCRIPT'
+#!/bin/bash
+echo "SAI-CAM System Health Check"
+echo "==========================="
+echo
+
+echo "System Resources:"
+echo "-----------------"
+if command -v vcgencmd &> /dev/null; then
+    echo "Temperature: $(vcgencmd measure_temp | cut -d= -f2)"
+fi
+echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | awk '{print $2+$4}')%"
+echo "Memory: $(free -h | grep Mem | awk '{print $3 "/" $2}')"
+echo "Disk: $(df -h /opt/sai-cam | tail -1 | awk '{print $3 "/" $2 " (" $5 ")"}')"
+echo
+
+echo "Services Status:"
+echo "----------------"
+systemctl is-active sai-cam > /dev/null && echo "✓ sai-cam: running" || echo "✗ sai-cam: stopped"
+systemctl is-active sai-cam-portal > /dev/null && echo "✓ portal: running" || echo "✗ portal: stopped"
+systemctl is-active watchdog > /dev/null && echo "✓ watchdog: running" || echo "✗ watchdog: not running"
+echo
+
+echo "Storage:"
+echo "--------"
+du -sh /opt/sai-cam/storage 2>/dev/null || echo "No storage data"
+HEALTHSCRIPT
+sudo chmod +x "$INSTALL_DIR/check_health.sh"
+echo "✅ Health check: $INSTALL_DIR/check_health.sh"
+
 echo ""
 if [ "$PRESERVE_CONFIG" = true ]; then
     echo "🎉 SAI-CAM Code Update Completed!"
@@ -815,16 +1116,19 @@ echo ""
 echo "🔍 Next Steps:"
 echo "--------------"
 echo "• Access status portal: http://$(hostname -I | awk '{print $1}')/"
+echo "• Check system health: $INSTALL_DIR/check_health.sh"
 echo "• Check service logs: sudo journalctl -u sai-cam -f"
-echo "• Check portal logs: sudo journalctl -u sai-cam-portal -f"
 echo "• Edit configuration: sudo nano $CONFIG_DIR/config.yaml"
 echo "• Restart services: sudo systemctl restart sai-cam sai-cam-portal"
-echo "• View camera feeds: Check Nginx proxy configuration (ports 8080+)"
+echo ""
+echo "📅 Scheduled Maintenance:"
+echo "  • Storage cleanup: Weekly Sunday 3 AM"
+echo "  • Log rotation: Weekly Sunday 2 AM"
+echo "  • System reboot: Daily at 4 AM"
 if [ "$PRESERVE_CONFIG" = true ]; then
     echo ""
     echo "⚠️  Note: Configuration was preserved from production"
-    echo "   If you need to update config, edit $CONFIG_DIR/config.yaml manually"
-    echo "   or run: sudo ./scripts/install.sh --config-only"
+    echo "   To update config: sudo nano $CONFIG_DIR/config.yaml && sudo systemctl restart sai-cam"
 fi
 echo ""
 echo "📚 For troubleshooting, see the documentation in docs/"

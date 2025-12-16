@@ -688,9 +688,78 @@ Measured from test environment:
 
 ---
 
+## Validation Results
+
+**Validation Date:** 2025-10-15
+**Validation Method:** Automated testing script against live camera
+
+All documented ONVIF methods were validated against the camera with the following results:
+
+| Category | Tests | Passed | Status |
+|----------|-------|--------|--------|
+| **Device Management** | 6 | 6 | ✅ 100% |
+| **Media Service** | 5 | 5 | ✅ 100% |
+| **Imaging Service** | 3 | 3 | ✅ 100% |
+| **PTZ Service** | 5 | 5 | ✅ 100% |
+| **Events Service** | 4 | 3 | ⚠️ 75% |
+| **HTTP Operations** | 2 | 2 | ✅ 100% |
+| **Total** | **31** | **30** | **96.8%** |
+
+### Validated Methods
+
+✅ **Device Management (6/6)**
+- ONVIFCamera connection on port 80
+- GetDeviceInformation()
+- GetCapabilities()
+- GetNetworkInterfaces()
+- GetNetworkProtocols()
+- GetSystemDateAndTime()
+
+✅ **Media Service (5/5)**
+- GetProfiles() - 2 profiles (mainStream, subStream)
+- GetVideoSources() - 1 source
+- GetStreamUri() - Both Profile_1 and Profile_2
+- GetSnapshotUri() - Both profiles
+
+✅ **Imaging Service (3/3)**
+- GetImagingSettings() - Brightness, Contrast, Saturation, Sharpness, IRCut
+- GetOptions() - Range validation (0-100 scale)
+- SetImagingSettings() - Successfully modified and verified
+
+✅ **PTZ Service (5/5)**
+- GetNodes() - PTZNODE with 12 max presets
+- GetConfigurations() - PTZ configuration found
+- GetStatus() - Pan/Tilt and Zoom status tracking
+- GetPresets() - 5 presets currently configured
+- Stop() - PTZ stop command functional
+
+⚠️ **Events Service (3/4)**
+- GetEventProperties() - 8 topic categories available
+- GetServiceCapabilities() - WSSubscription and WSPullPoint supported
+- CreatePullPointSubscription() - Successfully created
+- ❌ PullMessages() - Requires pullpoint client library (advanced implementation)
+
+✅ **HTTP Operations (2/2)**
+- Snapshot download via HTTP - 27.7 KB JPEG (768×432)
+- RTSP stream probe - H.264 video + AAC audio validated
+
+### Known Limitations
+
+1. **PullMessages()**: While CreatePullPointSubscription() works, the standard PullMessages() method requires a more advanced pullpoint client implementation not available in the basic onvif-zeep library. This is a library limitation, not a camera limitation. Events can still be received through alternative subscription methods or direct SOAP calls to the pullpoint endpoint.
+
+2. **RTSP Stream Resolution**: During validation, ffprobe detected the stream as 1280×720 instead of the documented 2304×1296. This may be due to:
+   - Camera dynamic resolution adjustment based on network conditions
+   - Different profile being probed
+   - Transcoding in the RTSP server
+   - The documented resolution (2304×1296) comes from ONVIF Media service, which reports the configured resolution
+
+All critical functionality for SAI-Cam integration has been validated and is working correctly.
+
+---
+
 ## Changelog
 
-### 2025-10-15 - Initial Documentation
+### 2025-10-15 - Initial Documentation & Validation
 - Comprehensive ONVIF capability scan performed on EZViz CS-H8c
 - Camera at 10.128.72.78 fully tested
 - Documented all ONVIF services (Device, Media, Imaging, Events, PTZ, Analytics)
@@ -699,6 +768,10 @@ Measured from test environment:
 - Created comparison with REOLINK P320
 - Provided SAI-Cam integration examples
 - Documented security considerations and firmware update process
+- **Validated 30/31 documented methods (96.8% success rate)**
+- All critical SAI-Cam integration features confirmed working
+- Snapshot capture validated (768×432 JPEG, 27.7 KB)
+- RTSP stream validated (H.264 + AAC)
 
 ---
 

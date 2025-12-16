@@ -40,7 +40,51 @@ Para comenzar, descarga e instala la última versión de Raspberry Pi OS Lite ut
 
 ### 2. Configuración de Red 🌐📶🧭
 
-* Asegúrate de que la Raspberry Pi tiene acceso a Internet a través de la conexión Ethernet. Zerotier gestionará la conectividad remota sin necesidad de una IP fija. 🌍🔗🔒
+SAI-Cam soporta dos modos de conectividad de red:
+
+#### Modo Ethernet (predeterminado)
+* Internet llega por cable Ethernet (router, switch con uplink, etc.)
+* Ethernet se configura con DHCP para obtener IP del router
+* WiFi AP disponible para configuración/monitoreo local
+* Configuración en `config.yaml`:
+```yaml
+network:
+  mode: 'ethernet'
+  node_ip: '192.168.x.x/24'  # IP estática adicional para cámaras
+  gateway: ''                 # Vacío = DHCP, o IP del gateway para static
+```
+
+#### Modo WiFi Client (sitios sin router cableado)
+* Internet llega por WiFi (conectado a red existente)
+* Ethernet es solo para red local de cámaras (IP estática, sin DHCP)
+* WiFi AP NO disponible (misma interfaz usada para internet)
+* Configuración en `config.yaml`:
+```yaml
+network:
+  mode: 'wifi-client'
+  node_ip: '192.168.220.x/24'  # IP estática para red de cámaras
+  wifi_client:
+    ssid: 'NombreRedWiFi'
+    password: 'contraseña'
+    wifi_iface: 'wlan0'
+```
+
+#### Configuración WiFi Inicial
+El script de instalación configura automáticamente:
+* Dominio regulatorio WiFi (`wifi_ap.country_code` en config.yaml, default: 'AR')
+* Desbloqueo de radio WiFi (`rfkill unblock wifi`)
+
+Si el WiFi no funciona después de la instalación, verificar:
+```bash
+# Ver estado de bloqueo
+rfkill list wifi
+
+# Desbloquear manualmente si es necesario
+sudo rfkill unblock wifi
+
+# Verificar dominio regulatorio
+iw reg get
+``` 🌍🔗🔒
 
 ### 3. Actualización del Sistema 🔄💡
 
@@ -96,18 +140,21 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
-### 6. Reconfiguración Posterior 🔄⚙️📝
+### 6. Actualización de Código 🔄⚙️📝
 
-Si necesitas modificar la configuración después de la instalación inicial o después de actualizar a una nueva versión del software, puedes usar la opción `--configure-only`:
+Si necesitas actualizar el código después de la instalación inicial (por ejemplo, después de un `git pull`), puedes usar la opción `--preserve-config` para mantener tu configuración de producción:
 
 ```bash
-sudo ./install.sh --configure-only
+git pull
+sudo ./install.sh --preserve-config
 ```
 
-Esta opción permite:
-- Aplicar cambios realizados en el archivo `config.yaml`
-- Reconfigurar servicios sin reinstalar dependencias
-- Actualizar configuración tras descargar una nueva versión del repositorio
+Esta opción:
+- Actualiza todo el código y servicios
+- Preserva tu configuración existente en `/etc/sai-cam/config.yaml`
+- Reinicia los servicios automáticamente
+
+**Nota:** Si ejecutas `./install.sh` sin flags y existe una configuración diferente en producción, el script te preguntará interactivamente qué hacer.
 
 ---
 
