@@ -1022,8 +1022,17 @@ if [ -e /dev/watchdog ] || modprobe bcm2835_wdt 2>/dev/null; then
     if [ -f "$INSTALL_DIR/system/config/watchdog.conf" ]; then
         sudo cp "$INSTALL_DIR/system/config/watchdog.conf" /etc/watchdog.conf
         sudo systemctl enable watchdog 2>/dev/null || true
-        sudo systemctl restart watchdog 2>/dev/null || true
-        echo "✅ Hardware watchdog enabled (15s timeout)"
+        # Stop first, wait, then start (avoid restart race condition)
+        sudo systemctl stop watchdog 2>/dev/null || true
+        sleep 2
+        sudo systemctl start watchdog 2>/dev/null || true
+        sleep 1
+        if systemctl is-active watchdog > /dev/null 2>&1; then
+            echo "✅ Hardware watchdog enabled (15s timeout)"
+        else
+            echo "⚠️  Hardware watchdog configured but failed to start"
+            echo "   Try manually: sudo systemctl start watchdog"
+        fi
     fi
 else
     echo "ℹ️  Hardware watchdog not available (not a Raspberry Pi?)"
