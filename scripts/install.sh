@@ -1019,6 +1019,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 # Service watchdog - every 10 minutes
 */10 * * * * root $INSTALL_DIR/system/monitoring/service_watchdog.sh >/dev/null 2>&1
 
+# Internet watchdog - every 3 minutes (auto-enable WiFi AP when offline)
+*/3 * * * * root $INSTALL_DIR/system/monitoring/internet_watchdog.sh >/dev/null 2>&1
+
 # Storage cleanup - weekly on Sunday at 3 AM
 0 3 * * 0 $SYSTEM_USER $INSTALL_DIR/system/monitoring/cleanup_storage.sh >/dev/null 2>&1
 
