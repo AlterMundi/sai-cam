@@ -490,10 +490,15 @@ echo "IP Address: ${NODE_IP:-'(not specified)'}"
 
 # Configure WiFi regulatory domain (required before any WiFi operations)
 echo "📡 Setting WiFi regulatory domain to $WIFI_COUNTRY_CODE..."
-sudo iw reg set "$WIFI_COUNTRY_CODE" 2>/dev/null || true
-# Persist regulatory domain
-if [ -f /etc/default/crda ]; then
-    sudo sed -i "s/^REGDOMAIN=.*/REGDOMAIN=$WIFI_COUNTRY_CODE/" /etc/default/crda 2>/dev/null || true
+# On Raspberry Pi OS, use raspi-config (required to unblock WiFi on fresh installs)
+if command -v raspi-config &> /dev/null; then
+    sudo raspi-config nonint do_wifi_country "$WIFI_COUNTRY_CODE" 2>/dev/null || true
+else
+    sudo iw reg set "$WIFI_COUNTRY_CODE" 2>/dev/null || true
+    # Persist regulatory domain on non-RPi systems
+    if [ -f /etc/default/crda ]; then
+        sudo sed -i "s/^REGDOMAIN=.*/REGDOMAIN=$WIFI_COUNTRY_CODE/" /etc/default/crda 2>/dev/null || true
+    fi
 fi
 
 # Unblock WiFi radio (required on fresh installations)
