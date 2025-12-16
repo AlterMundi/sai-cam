@@ -277,7 +277,7 @@ def get_network_info():
 
         # Determine WAN interface based on mode
         if network_mode == 'wifi-client':
-            wan_interface = config.get('network', {}).get('wifi_client', {}).get('interface', 'wlan0')
+            wan_interface = config.get('network', {}).get('wifi_client', {}).get('wifi_iface', 'wlan0')
         else:
             wan_interface = config.get('network', {}).get('interface', 'eth0')
 

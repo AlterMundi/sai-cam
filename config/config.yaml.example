@@ -2,11 +2,20 @@
 # Configure this file according to your specific node deployment
 
 # Network configuration for the node
+# mode: 'ethernet' - Internet via Ethernet cable (default, supports WiFi AP)
+# mode: 'wifi-client' - Internet via WiFi, Ethernet for local cameras only (no WiFi AP)
 network:
-  node_ip: '192.168.220.10/24'  # Fixed IP for this node
-  interface: 'eth0'             # Network interface
+  mode: 'ethernet'              # 'ethernet' or 'wifi-client'
+  node_ip: '192.168.220.10/24'  # Fixed IP for this node (static in wifi-client mode)
+  interface: 'eth0'             # Network interface for cameras
   connection_name: 'saicam'     # NetworkManager connection name
-  dhcp_primary: true            # Use DHCP as primary, fixed IP as secondary
+  gateway: ''                   # Optional gateway for ethernet (leave empty for DHCP)
+
+  # WiFi client settings (only used when mode: 'wifi-client')
+  wifi_client:
+    ssid: ''                    # WiFi network name
+    password: ''                # WiFi password
+    wifi_iface: 'wlan0'         # WiFi interface
 
 # System user configuration
 system:
@@ -107,3 +116,17 @@ advanced:
   polling_interval: 0.1
   reconnect_attempts: 3
   reconnect_delay: 5
+
+# Status Portal Configuration (optional - uses smart defaults if omitted)
+portal:
+  enabled: true            # Enable web status portal
+  port: 80                 # Port for status portal (default: 80)
+  refresh_interval: 5      # Dashboard refresh interval in seconds
+
+# WiFi Access Point Configuration (optional - auto-enabled if wlan0 exists)
+wifi_ap:
+  enabled: auto            # auto = enable if hardware present, true/false to force
+  ssid: auto               # auto = use "SAI-{device_id}", or specify custom SSID
+  password: 'saicam123'    # WiFi password (minimum 8 characters)
+  channel: 6               # WiFi channel (1-11)
+  country_code: 'AR'       # Country code for regulatory compliance

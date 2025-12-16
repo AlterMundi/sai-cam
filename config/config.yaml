@@ -15,7 +15,7 @@ network:
   wifi_client:
     ssid: ''                    # WiFi network name
     password: ''                # WiFi password
-    interface: 'wlan0'          # WiFi interface
+    wifi_iface: 'wlan0'         # WiFi interface (renamed to avoid collision with network.interface)
 
 # System user configuration
 system:

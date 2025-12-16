@@ -66,7 +66,7 @@ network:
   wifi_client:
     ssid: 'NombreRedWiFi'
     password: 'contraseña'
-    interface: 'wlan0'
+    wifi_iface: 'wlan0'
 ```
 
 #### Configuración WiFi Inicial
