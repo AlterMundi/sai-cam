@@ -470,6 +470,97 @@ def api_wifi_disable():
         logger.error(f"Error disabling WiFi AP: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+# Health API via Unix socket (direct access to camera_service state)
+
+def query_health_socket():
+    """Query camera service health via Unix domain socket"""
+    import socket
+    socket_path = '/run/sai-cam/health.sock'
+
+    if not os.path.exists(socket_path):
+        return None
+
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(2.0)
+        client.connect(socket_path)
+
+        data = b''
+        while True:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+
+        client.close()
+        return json.loads(data.decode('utf-8'))
+    except Exception as e:
+        logger.error(f"Health socket query failed: {e}")
+        return None
+
+
+@app.route('/api/health')
+def api_health():
+    """Get direct health metrics from camera service (not log-based)"""
+    health = query_health_socket()
+
+    if health is None:
+        return jsonify({
+            'error': 'Camera service not available',
+            'message': 'Camera service may not be running or socket not accessible',
+            'socket_path': '/run/sai-cam/health.sock'
+        }), 503
+
+    return jsonify(health)
+
+
+@app.route('/api/health/cameras')
+def api_health_cameras():
+    """Get camera-specific health from direct service state"""
+    health = query_health_socket()
+
+    if health is None or 'cameras' not in health:
+        return jsonify({'error': 'Camera health not available'}), 503
+
+    return jsonify({
+        'cameras': health['cameras'],
+        'failed_cameras': health.get('failed_cameras', {}),
+        'timestamp': health.get('timestamp')
+    })
+
+
+@app.route('/api/health/threads')
+def api_health_threads():
+    """Get thread health information from camera service"""
+    health = query_health_socket()
+
+    if health is None or 'threads' not in health:
+        return jsonify({'error': 'Thread health not available'}), 503
+
+    return jsonify({
+        'threads': health['threads'],
+        'timestamp': health.get('timestamp')
+    })
+
+
+@app.route('/api/health/system')
+def api_health_system():
+    """Get system health from camera service perspective"""
+    health = query_health_socket()
+
+    if health is None:
+        return jsonify({'error': 'System health not available'}), 503
+
+    return jsonify({
+        'system': health.get('system', {}),
+        'health_monitor': health.get('health_monitor', {}),
+        'uptime_seconds': health.get('uptime_seconds'),
+        'version': health.get('version'),
+        'timestamp': health.get('timestamp')
+    })
+
+
 def main():
     """Main entry point"""
     import argparse

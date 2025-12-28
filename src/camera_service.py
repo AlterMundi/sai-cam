@@ -79,11 +79,24 @@ class CameraInstance:
         except Exception as e:
             self.logger.error(f"Camera {self.camera_id}: Setup error: {str(e)}", exc_info=True)
             return False
-    
-    
-    
-    
-        
+
+    def _get_cpu_temp(self):
+        """Get CPU temperature (Raspberry Pi and other Linux systems)"""
+        try:
+            temps = psutil.sensors_temperatures()
+            if temps:
+                # Try common thermal zone names
+                for zone in ['cpu_thermal', 'coretemp', 'cpu-thermal', 'soc_thermal']:
+                    if zone in temps and temps[zone]:
+                        return round(temps[zone][0].current, 1)
+                # Return first available temperature
+                for zone, entries in temps.items():
+                    if entries:
+                        return round(entries[0].current, 1)
+        except Exception:
+            pass
+        return None
+
     def capture_images(self):
         """Capture images from this specific camera with backoff for failures"""
         polling_interval = self.global_config.get('advanced', {}).get('polling_interval', 0.1)
@@ -129,14 +142,48 @@ class CameraInstance:
                 cv2.putText(frame, f"{self.camera_id}: {timestamp}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-                # Build metadata
+                # Build rich metadata for ML training
                 metadata = {
+                    # Core identification (existing fields)
                     'timestamp': timestamp,
                     'device_id': self.global_config['device']['id'],
                     'camera_id': self.camera_id,
                     'location': self.global_config['device']['location'],
                     'version': VERSION,
-                    'camera_type': self.camera_type
+                    'camera_type': self.camera_type,
+
+                    # Device context
+                    'device': {
+                        'uptime_seconds': round(time.time() - self.global_config.get('_start_time', time.time()), 1),
+                        'description': self.global_config['device'].get('description', ''),
+                    },
+
+                    # System metrics at capture time
+                    'system': {
+                        'cpu_percent': psutil.cpu_percent(),
+                        'memory_percent': round(psutil.virtual_memory().percent, 1),
+                        'disk_percent': round(psutil.disk_usage('/').percent, 1),
+                        'cpu_temp': self._get_cpu_temp(),
+                    },
+
+                    # Camera context
+                    'camera': {
+                        'capture_interval': self.capture_interval,
+                        'position': self.config.get('position', {}),
+                        'resolution': self.config.get('resolution', [1280, 720]),
+                    },
+
+                    # Image quality hints
+                    'image': {
+                        'brightness_avg': round(float(np.mean(frame)), 1),
+                        'dimensions': [frame.shape[1], frame.shape[0]],
+                    },
+
+                    # Environmental context
+                    'environment': {
+                        'capture_time_utc': datetime.utcnow().isoformat() + 'Z',
+                        'timezone': time.strftime('%z'),
+                    },
                 }
 
                 # Encode image
@@ -192,6 +239,8 @@ class CameraService:
         try:
             with open(self.config_path, 'r') as file:
                 self.config = yaml.safe_load(file)
+            # Track service start time for uptime calculation in metadata
+            self.config['_start_time'] = time.time()
         except Exception as e:
             sys.exit(f"Failed to load configuration: {e}")
 
@@ -550,7 +599,8 @@ class CameraService:
             Thread(target=self.upload_images, name="UploadProcessor"),
             Thread(target=self.health_monitor.run, name="HealthMonitor"),
             Thread(target=self.storage_manager.run_cleanup_thread, name="StorageManager"),
-            Thread(target=self.retry_failed_cameras, name="CameraRetry")
+            Thread(target=self.retry_failed_cameras, name="CameraRetry"),
+            Thread(target=self.health_socket_server, name="HealthSocket"),
         ]
 
         if self.watchdog_usec:
@@ -564,6 +614,7 @@ class CameraService:
             # Register signal handlers
             signal.signal(signal.SIGTERM, self.handle_shutdown)
             signal.signal(signal.SIGINT, self.handle_shutdown)
+            signal.signal(signal.SIGHUP, self.handle_reload)
 
             # Keep main thread alive
             while self.running:
@@ -576,6 +627,193 @@ class CameraService:
         """Handle shutdown signals gracefully"""
         self.logger.info(f"Received signal {signum}, initiating shutdown...")
         self.cleanup()
+
+    def handle_reload(self, signum, frame):
+        """Handle SIGHUP for config hot-reload"""
+        self.logger.info("Received SIGHUP, reloading configuration...")
+
+        try:
+            # Load new config
+            with open(self.config_path, 'r') as file:
+                new_config = yaml.safe_load(file)
+        except Exception as e:
+            self.logger.error(f"Failed to reload config: {e}")
+            return
+
+        changes = []
+        restart_required = []
+        old_config = self.config
+
+        # 1. Logging level (safe to reload)
+        new_level = new_config.get('logging', {}).get('level', 'INFO')
+        old_level = old_config.get('logging', {}).get('level', 'INFO')
+        if new_level != old_level:
+            log_level = getattr(logging, new_level, logging.INFO)
+            self.logger.setLevel(log_level)
+            for handler in self.logger.handlers:
+                handler.setLevel(log_level)
+            changes.append(f"logging.level: {old_level} -> {new_level}")
+
+        # 2. Monitoring thresholds (safe to reload)
+        for key in ['health_check_interval', 'max_memory_percent', 'max_cpu_percent']:
+            new_val = new_config.get('monitoring', {}).get(key)
+            old_val = old_config.get('monitoring', {}).get(key)
+            if new_val is not None and new_val != old_val:
+                self.health_monitor.config[key] = new_val
+                changes.append(f"monitoring.{key}: {old_val} -> {new_val}")
+
+        # 3. Server settings (safe to reload - used per-upload)
+        for key in ['url', 'auth_token', 'timeout', 'ssl_verify']:
+            new_val = new_config.get('server', {}).get(key)
+            old_val = old_config.get('server', {}).get(key)
+            if new_val is not None and new_val != old_val:
+                display_old = '***' if 'token' in key else old_val
+                display_new = '***' if 'token' in key else new_val
+                changes.append(f"server.{key}: {display_old} -> {display_new}")
+
+        # 4. Advanced settings (safe to reload)
+        for key in ['polling_interval', 'reconnect_delay', 'reconnect_attempts']:
+            new_val = new_config.get('advanced', {}).get(key)
+            old_val = old_config.get('advanced', {}).get(key)
+            if new_val is not None and new_val != old_val:
+                changes.append(f"advanced.{key}: {old_val} -> {new_val}")
+
+        # Check for changes that require restart (warn only)
+        if new_config.get('cameras') != old_config.get('cameras'):
+            restart_required.append('cameras')
+        if new_config.get('storage', {}).get('base_path') != old_config.get('storage', {}).get('base_path'):
+            restart_required.append('storage.base_path')
+        if new_config.get('network') != old_config.get('network'):
+            restart_required.append('network')
+        if new_config.get('device') != old_config.get('device'):
+            restart_required.append('device')
+
+        # Preserve _start_time from original config
+        new_config['_start_time'] = old_config.get('_start_time', time.time())
+
+        # Update config reference
+        self.config = new_config
+
+        # Log results
+        if changes:
+            self.logger.info(f"Config reload applied {len(changes)} change(s):")
+            for change in changes:
+                self.logger.info(f"  - {change}")
+        else:
+            self.logger.info("Config reload: no safe changes detected")
+
+        if restart_required:
+            self.logger.warning(
+                f"Config reload: the following changes require service restart to take effect: "
+                f"{', '.join(restart_required)}"
+            )
+
+    def health_socket_server(self):
+        """Serve health status via Unix domain socket for status_portal integration"""
+        import socket as sock
+
+        socket_path = '/run/sai-cam/health.sock'
+
+        # Ensure directory exists (systemd RuntimeDirectory should create it, but fallback)
+        socket_dir = os.path.dirname(socket_path)
+        try:
+            os.makedirs(socket_dir, exist_ok=True)
+        except PermissionError:
+            self.logger.warning(f"Cannot create {socket_dir}, health socket disabled")
+            return
+
+        # Remove stale socket file
+        if os.path.exists(socket_path):
+            try:
+                os.unlink(socket_path)
+            except Exception as e:
+                self.logger.warning(f"Cannot remove stale socket {socket_path}: {e}")
+                return
+
+        try:
+            server = sock.socket(sock.AF_UNIX, sock.SOCK_STREAM)
+            server.bind(socket_path)
+            os.chmod(socket_path, 0o666)  # Allow portal to connect
+            server.listen(5)
+            server.settimeout(1.0)  # Allow checking self.running
+            self.logger.info(f"Health socket server listening on {socket_path}")
+        except Exception as e:
+            self.logger.warning(f"Failed to start health socket server: {e}")
+            return
+
+        while self.running:
+            try:
+                conn, _ = server.accept()
+                try:
+                    health_data = self._get_health_data()
+                    response = json.dumps(health_data)
+                    conn.sendall(response.encode('utf-8'))
+                finally:
+                    conn.close()
+            except sock.timeout:
+                continue
+            except Exception as e:
+                self.logger.debug(f"Health socket error: {e}")
+
+        # Cleanup on shutdown
+        try:
+            server.close()
+            if os.path.exists(socket_path):
+                os.unlink(socket_path)
+        except Exception:
+            pass
+
+    def _get_health_data(self):
+        """Collect current health state for socket response"""
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'version': VERSION,
+            'uptime_seconds': round(time.time() - self.config.get('_start_time', time.time()), 1),
+
+            # System metrics
+            'system': {
+                'cpu_percent': psutil.cpu_percent(),
+                'memory_percent': round(psutil.virtual_memory().percent, 1),
+                'disk_percent': round(psutil.disk_usage('/').percent, 1),
+            },
+
+            # Health monitor metrics
+            'health_monitor': {
+                'check_count': self.health_monitor.metrics.get('check_count', 0),
+                'warning_count': self.health_monitor.metrics.get('warning_count', 0),
+                'error_count': self.health_monitor.metrics.get('error_count', 0),
+                'last_check': self.health_monitor.metrics.get('last_check', 0),
+            },
+
+            # Thread health
+            'threads': {
+                'total': len(self.camera_threads),
+                'alive': sum(1 for t in self.camera_threads.values() if t.is_alive()),
+                'cameras': {
+                    cam_id: t.is_alive() if t else False
+                    for cam_id, t in self.camera_threads.items()
+                }
+            },
+
+            # Per-camera state from CameraStateTracker
+            'cameras': {
+                cam_id: {
+                    **instance.state_tracker.get_status(),
+                    'thread_alive': self.camera_threads.get(cam_id) is not None
+                        and self.camera_threads[cam_id].is_alive(),
+                }
+                for cam_id, instance in self.camera_instances.items()
+            },
+
+            # Failed cameras pending retry
+            'failed_cameras': {
+                cam_id: {
+                    'attempts': attempts,
+                    'next_retry': next_retry,
+                }
+                for cam_id, (config, attempts, next_retry) in self.failed_cameras.items()
+            },
+        }
 
     def cleanup(self):
         """Clean up resources"""

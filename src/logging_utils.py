@@ -8,7 +8,7 @@ log spam from repeated errors (e.g., offline cameras).
 import time
 import logging
 from typing import Optional, Dict, Any
-from threading import Lock
+from threading import Lock, RLock
 
 
 class RateLimitedLogger:
@@ -147,7 +147,7 @@ class CameraStateTracker:
         self._next_attempt_time = 0
         self._backoff_multiplier = 1
         self._max_backoff_multiplier = 12  # Max 12x capture_interval between retries
-        self._lock = Lock()
+        self._lock = RLock()  # Reentrant lock for nested calls (get_status -> time_until_next_attempt)
 
     @property
     def state(self) -> str:

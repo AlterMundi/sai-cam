@@ -94,6 +94,7 @@ class ONVIFCameraImpl(BaseCamera):
             
             if not wsdl_path:
                 # Auto-detect WSDL path
+                import glob
                 potential_paths = [
                     f'/opt/sai-cam/venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages/wsdl/',
                     '/opt/sai-cam/venv/lib/python3.4/site-packages/wsdl/',  # Legacy path from working script
@@ -102,21 +103,29 @@ class ONVIFCameraImpl(BaseCamera):
                     '/usr/local/lib/python3*/site-packages/wsdl/',
                     './venv/lib/python3*/site-packages/wsdl/',
                 ]
-                
+
+                # Track checked paths for error reporting
+                checked_paths = []
+
                 # Find the first existing WSDL path
                 for path in potential_paths:
                     # Handle glob patterns
                     if '*' in path:
-                        import glob
                         matches = glob.glob(path)
                         if matches:
-                            path = matches[0]
-                    
-                    if os.path.exists(path):
+                            resolved_path = matches[0]
+                            if os.path.exists(resolved_path):
+                                wsdl_path = resolved_path
+                                self.logger.debug(f"Camera {self.camera_id}: Auto-detected WSDL path: {wsdl_path}")
+                                break
+                        checked_paths.append(f"{path} (no matches)")
+                    elif os.path.exists(path):
                         wsdl_path = path
                         self.logger.debug(f"Camera {self.camera_id}: Auto-detected WSDL path: {wsdl_path}")
                         break
-            
+                    else:
+                        checked_paths.append(path)
+
             if wsdl_path:
                 self.onvif_camera = ONVIFCamera(
                     self.address,
@@ -126,14 +135,33 @@ class ONVIFCameraImpl(BaseCamera):
                     wsdl_path
                 )
             else:
-                # Fallback without WSDL path (may fail)
-                self.logger.warning(f"Camera {self.camera_id}: WSDL path not found, trying without explicit path")
-                self.onvif_camera = ONVIFCamera(
-                    self.address,
-                    self.port,
-                    self.username,
-                    self.password
+                # Log actionable error with checked paths
+                self.logger.error(
+                    f"Camera {self.camera_id}: ONVIF WSDL files not found. "
+                    f"Checked paths: {', '.join(checked_paths[:3])}"
                 )
+                self.logger.error(
+                    f"Camera {self.camera_id}: To fix WSDL issue: "
+                    f"1) Reinstall onvif-zeep: pip install --force-reinstall onvif-zeep, "
+                    f"2) Set ONVIF_WSDL_PATH environment variable, or "
+                    f"3) Add 'wsdl_path' to camera config in config.yaml"
+                )
+                # Attempt without WSDL path (some library versions may work)
+                self.logger.warning(f"Camera {self.camera_id}: Attempting ONVIF connection without explicit WSDL path...")
+                try:
+                    self.onvif_camera = ONVIFCamera(
+                        self.address,
+                        self.port,
+                        self.username,
+                        self.password
+                    )
+                except Exception as wsdl_error:
+                    self.logger.error(
+                        f"Camera {self.camera_id}: ONVIF connection failed without WSDL: {wsdl_error}. "
+                        f"This camera requires WSDL files to function."
+                    )
+                    self.is_connected = False
+                    return False
             
             # Test basic connectivity
             try:
