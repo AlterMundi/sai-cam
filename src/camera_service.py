@@ -856,6 +856,7 @@ class StorageManager:
         self.retention_days = retention_days
         self.logger = logger
         self.running = True
+        self._cleanup_lock = Lock()  # Prevent concurrent cleanup operations
 
         # Create storage directories
         self.uploaded_path = self.base_path / 'uploaded'
@@ -882,7 +883,7 @@ class StorageManager:
             self.logger.debug(f"Current storage usage: {current_size:.2f}GB/{self.max_size_gb}GB")
             if current_size >= self.max_size_gb:
                 self.logger.warning(f"Storage limit reached ({current_size:.2f}GB/{self.max_size_gb}GB), forcing cleanup")
-                self.cleanup_old_files()
+                self.cleanup_old_files(force=True)
 
             # Store image
             file_path = self.base_path / filename
@@ -926,77 +927,110 @@ class StorageManager:
             self.logger.error(f"Failed to mark {filename} as uploaded: {str(e)}", exc_info=True)
             return False
 
-    def cleanup_old_files(self):
-        """Remove old files to maintain storage limits"""
-        try:
-            current_size = self.get_current_size_gb()
+    def cleanup_old_files(self, force=False):
+        """Remove old files to maintain storage limits
 
-            if current_size > self.cleanup_threshold_gb:
-                self.logger.info(f"Starting storage cleanup. Current size: {current_size:.2f}GB")
+        Args:
+            force: If True, delete oldest files regardless of age until under threshold.
+                   Used when storage is critically over limit.
+        """
+        # Use non-blocking lock to prevent multiple concurrent cleanups
+        if not self._cleanup_lock.acquire(blocking=False):
+            return  # Another cleanup is in progress
+
+        try:
+            current_size_bytes = sum(f.stat().st_size for f in self.base_path.rglob('*') if f.is_file())
+            current_size_gb = current_size_bytes / (1024**3)
+            target_size_bytes = self.cleanup_threshold_gb * (1024**3)
+            retention_seconds = self.retention_days * 24 * 3600
+            deleted_count = 0
+
+            if current_size_gb > self.cleanup_threshold_gb:
+                self.logger.warning(f"Starting storage cleanup. Current: {current_size_gb:.2f}GB, Target: {self.cleanup_threshold_gb}GB" +
+                                    (" (forced)" if force else ""))
 
                 # Remove old uploaded files first
                 if self.uploaded_path.exists():
-                    uploaded_files = sorted(
-                        self.uploaded_path.glob('*.jpg'),
-                        key=lambda x: x.stat().st_mtime
-                    )
-                    for file in uploaded_files:
-                        if (datetime.now().timestamp() - file.stat().st_mtime) > \
-                           (self.retention_days * 24 * 3600):
+                    # Get files with their mtime and size, handling files that may have been deleted
+                    uploaded_files = []
+                    for f in self.uploaded_path.glob('*.jpg'):
+                        try:
+                            stat = f.stat()
+                            uploaded_files.append((f, stat.st_mtime, stat.st_size))
+                        except FileNotFoundError:
+                            continue  # File was deleted by another thread
+                    uploaded_files.sort(key=lambda x: x[1])  # Sort by mtime (oldest first)
+
+                    for file, mtime, file_size in uploaded_files:
+                        file_age = datetime.now().timestamp() - mtime
+                        # Delete if: older than retention OR force mode is on
+                        if file_age > retention_seconds or force:
                             try:
                                 # Remove image and its metadata
                                 file.unlink()
+                                current_size_bytes -= file_size
+                                deleted_count += 1
                                 meta_file = self.uploaded_path / 'metadata' / f"{file.name}.json"
                                 if meta_file.exists():
                                     meta_file.unlink()
                             except FileNotFoundError:
                                 # File already deleted, skip silently
-                                self.logger.debug(f"Cleanup: File already removed: {file.name}")
                                 continue
                             except Exception as e:
                                 # Log other errors but continue cleanup
                                 self.logger.warning(f"Failed to delete {file.name}: {str(e)}")
                                 continue
 
-                            if self.get_current_size_gb() < self.cleanup_threshold_gb:
+                            if current_size_bytes < target_size_bytes:
                                 break
 
                 # If still above threshold, remove old non-uploaded files
-                if self.get_current_size_gb() > self.cleanup_threshold_gb:
-                    non_uploaded_files = sorted(
-                        self.base_path.glob('*.jpg'),
-                        key=lambda x: x.stat().st_mtime
-                    )
-                    for file in non_uploaded_files:
-                        if (datetime.now().timestamp() - file.stat().st_mtime) > \
-                           (self.retention_days * 24 * 3600):
+                if current_size_bytes > target_size_bytes:
+                    non_uploaded_files = []
+                    for f in self.base_path.glob('*.jpg'):
+                        try:
+                            stat = f.stat()
+                            non_uploaded_files.append((f, stat.st_mtime, stat.st_size))
+                        except FileNotFoundError:
+                            continue
+                    non_uploaded_files.sort(key=lambda x: x[1])
+
+                    for file, mtime, file_size in non_uploaded_files:
+                        file_age = datetime.now().timestamp() - mtime
+                        # Delete if: older than retention OR force mode is on
+                        if file_age > retention_seconds or force:
                             try:
                                 file.unlink()
+                                current_size_bytes -= file_size
+                                deleted_count += 1
                                 meta_file = self.metadata_path / f"{file.name}.json"
                                 if meta_file.exists():
                                     meta_file.unlink()
                             except FileNotFoundError:
-                                # File already deleted, skip silently
-                                self.logger.debug(f"Cleanup: File already removed: {file.name}")
                                 continue
                             except Exception as e:
-                                # Log other errors but continue cleanup
                                 self.logger.warning(f"Failed to delete {file.name}: {str(e)}")
                                 continue
 
-                            if self.get_current_size_gb() < self.cleanup_threshold_gb:
+                            if current_size_bytes < target_size_bytes:
                                 break
 
-                self.logger.info(f"Cleanup completed. New size: {self.get_current_size_gb():.2f}GB")
+                final_size_gb = current_size_bytes / (1024**3)
+                self.logger.warning(f"Cleanup completed. Deleted {deleted_count} files. New size: {final_size_gb:.2f}GB")
 
         except Exception as e:
             self.logger.error(f"Cleanup error: {str(e)}", exc_info=True)
+        finally:
+            self._cleanup_lock.release()
 
     def run_cleanup_thread(self):
         """Run periodic cleanup"""
         while self.running:
             try:
-                self.cleanup_old_files()
+                # Use force mode if storage is critically over limit
+                current_size = self.get_current_size_gb()
+                force = current_size >= self.max_size_gb
+                self.cleanup_old_files(force=force)
                 time.sleep(3600)  # Check every hour
             except Exception as e:
                 self.logger.error(f"Cleanup thread error: {str(e)}", exc_info=True)
