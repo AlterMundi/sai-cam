@@ -1051,6 +1051,67 @@ footer p {
   cursor: not-allowed;
 }
 
+/* Connection Status Indicator */
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+
+.connection-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: background 0.3s ease;
+}
+
+.connection-status .status-text {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.connection-status.connected .status-dot {
+  background: var(--success-color);
+  box-shadow: 0 0 6px var(--success-color);
+}
+
+.connection-status.connected .status-text {
+  color: #a8e6cf;
+}
+
+.connection-status.disconnected .status-dot {
+  background: var(--error-color);
+  animation: pulse-dot 1.5s infinite;
+}
+
+.connection-status.disconnected .status-text {
+  color: #ffb3b3;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+/* Log debug lines */
+
+.log-debug {
+  color: #888;
+  font-style: italic;
+}
+
 /* Mobile adjustments for buttons */
 
 @media (max-width: 768px) {

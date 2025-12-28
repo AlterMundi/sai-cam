@@ -28,7 +28,7 @@ const BLOCKS = {
         <div class="block">
           <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
           <div class="gauges">
-            <div class="gauge">
+            <div class="gauge" data-gauge="cpu">
               <div class="gauge-circle">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -42,7 +42,7 @@ const BLOCKS = {
                 <div class="gauge-label">CPU</div>
               </div>
             </div>
-            <div class="gauge">
+            <div class="gauge" data-gauge="memory">
               <div class="gauge-circle">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -54,10 +54,10 @@ const BLOCKS = {
               </div>
               <div class="gauge-info">
                 <div class="gauge-label">Memory</div>
-                <div class="gauge-detail">${sys.memory_used_mb}MB / ${sys.memory_total_mb}MB</div>
+                <div class="gauge-detail" data-memory-detail>${sys.memory_used_mb}MB / ${sys.memory_total_mb}MB</div>
               </div>
             </div>
-            <div class="gauge">
+            <div class="gauge" data-gauge="disk">
               <div class="gauge-circle">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
@@ -69,7 +69,7 @@ const BLOCKS = {
               </div>
               <div class="gauge-info">
                 <div class="gauge-label">Disk</div>
-                <div class="gauge-detail">${sys.disk_used_gb}GB / ${sys.disk_total_gb}GB</div>
+                <div class="gauge-detail" data-disk-detail>${sys.disk_used_gb}GB / ${sys.disk_total_gb}GB</div>
               </div>
             </div>
             ${tempGauge}
@@ -150,10 +150,10 @@ const BLOCKS = {
       const onlineCount = cameras.filter(c => c.online).length;
 
       const cameraCards = cameras.map(cam => `
-        <div class="camera-card ${cam.online ? 'online' : 'offline'}">
+        <div class="camera-card ${cam.online ? 'online' : 'offline'}" data-camera="${cam.id}">
           <div class="camera-header">
             <h4>${cam.id}</h4>
-            <span class="badge ${cam.online ? 'online' : 'offline'}">
+            <span class="badge ${cam.online ? 'online' : 'offline'}" data-camera-badge>
               ${cam.online ? '●' : '○'}
             </span>
           </div>
@@ -166,7 +166,7 @@ const BLOCKS = {
               </div>
             ` : '<div class="camera-no-image">No images captured yet</div>'}
             <div class="camera-info">
-              <small>Last: ${cam.last_capture || 'N/A'}</small>
+              <small data-camera-last-capture>Last: ${cam.last_capture || 'N/A'}</small>
               <small>Interval: ${cam.capture_interval}s</small>
             </div>
           ` : `
@@ -646,12 +646,220 @@ function showNotification(message, type = 'info') {
   }, 4000);
 }
 
-// Initialize dashboard
-document.addEventListener('DOMContentLoaded', () => {
-  renderDashboard();
-  fetchLogLevel();
+// ========================================
+// SSE (Server-Sent Events) Implementation
+// ========================================
 
-  // Auto-refresh
+let eventSource = null;
+
+function connectEventStream() {
+  if (eventSource) {
+    eventSource.close();
+  }
+
+  eventSource = new EventSource('/api/events');
+
+  eventSource.addEventListener('health', (e) => {
+    try {
+      const health = JSON.parse(e.data);
+      updateHealthData(health);
+    } catch (error) {
+      console.error('Error parsing health data:', error);
+    }
+  });
+
+  eventSource.addEventListener('log', (e) => {
+    try {
+      const {line} = JSON.parse(e.data);
+      appendLogLine(line);
+    } catch (error) {
+      console.error('Error parsing log data:', error);
+    }
+  });
+
+  eventSource.addEventListener('status', (e) => {
+    try {
+      const status = JSON.parse(e.data);
+      updateStatusData(status);
+    } catch (error) {
+      console.error('Error parsing status data:', error);
+    }
+  });
+
+  eventSource.onerror = () => {
+    console.warn('SSE connection error, reconnecting in 5s...');
+    updateConnectionStatus(false);
+    eventSource.close();
+    setTimeout(connectEventStream, 5000);
+  };
+
+  eventSource.onopen = () => {
+    console.log('SSE connection established');
+    updateConnectionStatus(true);
+  };
+}
+
+function updateConnectionStatus(connected) {
+  const statusEl = document.getElementById('connection-status');
+  if (!statusEl) return;
+
+  if (connected) {
+    statusEl.className = 'connection-status connected';
+    statusEl.querySelector('.status-text').textContent = 'Live';
+  } else {
+    statusEl.className = 'connection-status disconnected';
+    statusEl.querySelector('.status-text').textContent = 'Reconnecting...';
+  }
+}
+
+// Selective update functions for SSE events
+
+function updateHealthData(health) {
+  // Update timestamp
+  const timeEl = document.getElementById('update-time');
+  if (timeEl) {
+    timeEl.textContent = new Date().toLocaleTimeString();
+  }
+
+  // Update system gauges
+  if (health.system) {
+    updateGauge('cpu', health.system.cpu_percent);
+    updateGauge('memory', health.system.memory_percent, {
+      detail: `${health.system.memory_used_mb}MB / ${health.system.memory_total_mb}MB`
+    });
+    updateGauge('disk', health.system.disk_percent, {
+      detail: `${health.system.disk_used_gb}GB / ${health.system.disk_total_gb}GB`
+    });
+  }
+
+  // Update camera cards from health socket data
+  if (health.cameras) {
+    Object.entries(health.cameras).forEach(([id, cam]) => {
+      updateCameraCard(id, cam);
+    });
+  }
+}
+
+function updateGauge(type, value, options = {}) {
+  const gauge = document.querySelector(`[data-gauge="${type}"]`);
+  if (!gauge) return;
+
+  const circle = gauge.querySelector('.circle');
+  const percentage = gauge.querySelector('.percentage');
+  const detail = gauge.querySelector('.gauge-detail');
+
+  if (circle) {
+    // Update stroke-dasharray for the circle
+    circle.setAttribute('stroke-dasharray', `${value}, 100`);
+    // Update color classes
+    circle.classList.remove('critical', 'warning');
+    if (value > 80) circle.classList.add('critical');
+    else if (value > 60) circle.classList.add('warning');
+  }
+
+  if (percentage) {
+    percentage.textContent = `${value}%`;
+  }
+
+  if (detail && options.detail) {
+    detail.textContent = options.detail;
+  }
+}
+
+function updateCameraCard(id, status) {
+  const card = document.querySelector(`[data-camera="${id}"]`);
+  if (!card) return;
+
+  const isOnline = status.state === 'healthy' && status.thread_alive;
+
+  // Update card class
+  card.classList.remove('online', 'offline');
+  card.classList.add(isOnline ? 'online' : 'offline');
+
+  // Update badge
+  const badge = card.querySelector('[data-camera-badge]');
+  if (badge) {
+    badge.classList.remove('online', 'offline');
+    badge.classList.add(isOnline ? 'online' : 'offline');
+    badge.textContent = isOnline ? '●' : '○';
+  }
+
+  // Update last capture time
+  const lastCapture = card.querySelector('[data-camera-last-capture]');
+  if (lastCapture && status.last_success_age !== undefined) {
+    lastCapture.textContent = `Last: ${formatAge(status.last_success_age)}`;
+  }
+}
+
+function formatAge(seconds) {
+  if (seconds === undefined || seconds === null) return 'N/A';
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
+function appendLogLine(line) {
+  const viewer = document.getElementById('log-viewer');
+  if (!viewer) return;
+
+  // Remove "Loading..." if present
+  const loading = viewer.querySelector('.log-loading');
+  if (loading) loading.remove();
+
+  // Create log line element
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  if (line.includes('ERROR')) div.className += ' log-error';
+  else if (line.includes('WARNING')) div.className += ' log-warning';
+  else if (line.includes('DEBUG')) div.className += ' log-debug';
+  div.textContent = line;
+
+  // Append to viewer
+  viewer.appendChild(div);
+
+  // Keep max 200 lines
+  while (viewer.children.length > 200) {
+    viewer.removeChild(viewer.firstChild);
+  }
+
+  // Auto-scroll if near bottom
+  const isNearBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 100;
+  if (isNearBottom) {
+    viewer.scrollTop = viewer.scrollHeight;
+  }
+}
+
+function updateStatusData(status) {
+  // Update storage metrics if present
+  if (status.storage) {
+    // Storage updates can be handled here
+    // For now, these are less frequent so we could re-render the storage block
+  }
+
+  // Update network metrics if present
+  if (status.network) {
+    const internetEl = document.getElementById('internet-status');
+    if (internetEl) {
+      internetEl.textContent = status.network.upstream_online ? '● Online' : '○ Offline';
+      internetEl.className = status.network.upstream_online ? 'status-online' : 'status-offline';
+    }
+  }
+}
+
+// Initialize dashboard
+document.addEventListener('DOMContentLoaded', async () => {
+  // 1. Initial full render (existing BLOCKS pattern)
+  await renderDashboard();
+
+  // 2. Fetch initial log level
+  await fetchLogLevel();
+
+  // 3. Connect SSE for real-time updates
+  connectEventStream();
+
+  // 4. Keep polling as fallback for now (will be removed after SSE is verified)
+  // TODO: Remove after SSE is stable
   setInterval(renderDashboard, REFRESH_INTERVAL);
-  setInterval(fetchLogLevel, 30000);  // Refresh log level every 30s
+  setInterval(fetchLogLevel, 30000);
 });

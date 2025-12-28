@@ -12,7 +12,7 @@ import psutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, jsonify, send_from_directory, Response, request
+from flask import Flask, jsonify, send_from_directory, Response, request, stream_with_context
 from threading import Thread
 import time
 import logging
@@ -399,6 +399,98 @@ def api_logs_stream():
                 time.sleep(5)
 
     return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/api/events')
+def api_events():
+    """Unified SSE endpoint for dashboard real-time updates.
+
+    Events emitted:
+    - health: Camera/system status (every 5s or on change)
+    - log: New log lines (real-time)
+    - status: Network/storage updates (every 30s)
+    """
+    def generate():
+        log_path = Path('/var/log/sai-cam/camera_service.log')
+        last_log_size = log_path.stat().st_size if log_path.exists() else 0
+        last_health_hash = None
+        last_status_hash = None
+        last_health_time = 0
+        last_status_time = 0
+
+        # Send initial health immediately
+        try:
+            health = query_health_socket() or {}
+            # Add system metrics from psutil
+            health['system'] = get_system_info()
+            yield f"event: health\ndata: {json.dumps(health)}\n\n"
+            last_health_hash = hash(json.dumps(health, sort_keys=True))
+            last_health_time = time.time()
+        except Exception as e:
+            logger.debug(f"Initial health fetch failed: {e}")
+
+        while True:
+            try:
+                now = time.time()
+
+                # Health updates (every 5s, only if changed)
+                if now - last_health_time >= 5:
+                    health = query_health_socket() or {}
+                    # Add system metrics from psutil
+                    health['system'] = get_system_info()
+                    health_hash = hash(json.dumps(health, sort_keys=True))
+                    if health_hash != last_health_hash:
+                        yield f"event: health\ndata: {json.dumps(health)}\n\n"
+                        last_health_hash = health_hash
+                    last_health_time = now
+
+                # Status updates - network/storage (every 30s)
+                if now - last_status_time >= 30:
+                    try:
+                        status_data = {
+                            'network': get_network_info(),
+                            'storage': get_storage_info(),
+                        }
+                        status_hash = hash(json.dumps(status_data, sort_keys=True))
+                        if status_hash != last_status_hash:
+                            yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
+                            last_status_hash = status_hash
+                    except Exception as e:
+                        logger.debug(f"Status fetch failed: {e}")
+                    last_status_time = now
+
+                # Log updates (real-time)
+                if log_path.exists():
+                    current_size = log_path.stat().st_size
+                    if current_size > last_log_size:
+                        # New log content
+                        with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                            f.seek(last_log_size)
+                            for line in f:
+                                line = line.strip()
+                                if line:
+                                    yield f"event: log\ndata: {json.dumps({'line': line})}\n\n"
+                        last_log_size = current_size
+                    elif current_size < last_log_size:
+                        # Log rotated - reset position
+                        last_log_size = 0
+
+                time.sleep(1)
+
+            except GeneratorExit:
+                # Client disconnected
+                break
+            except Exception as e:
+                logger.error(f"SSE event stream error: {e}")
+                yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                time.sleep(5)
+
+    response = Response(stream_with_context(generate()), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
+    response.headers['Connection'] = 'keep-alive'
+    return response
+
 
 @app.route('/api/images/<camera_id>/latest')
 def api_latest_image(camera_id):
