@@ -103,7 +103,7 @@ monitoring:
   restart_on_failure: true
 
 logging:
-  level: 'INFO'
+  level: 'WARNING'  # Production default: WARNING (only warnings & errors), INFO, or DEBUG
   log_dir: '/var/log/sai-cam'
   log_file: 'camera_service.log'
   max_size_bytes: 10485760

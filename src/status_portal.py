@@ -673,7 +673,7 @@ def api_health_system():
 def api_get_log_level():
     """Get current log level from config"""
     try:
-        current_level = config.get('logging', {}).get('level', 'INFO')
+        current_level = config.get('logging', {}).get('level', 'WARNING')
         return jsonify({'level': current_level})
     except Exception as e:
         return jsonify({'error': str(e)}), 500

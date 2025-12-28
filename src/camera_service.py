@@ -193,7 +193,7 @@ class CameraInstance:
                 # Store and queue for upload
                 filename = f"{self.camera_id}_{timestamp}.jpg"
                 img_size = len(image_data) / 1024
-                self.logger.info(f"Camera {self.camera_id}: Captured {filename} ({img_size:.1f}KB)")
+                self.logger.debug(f"Camera {self.camera_id}: Captured {filename} ({img_size:.1f}KB)")
 
                 self.storage_manager.store_image(image_data, filename, metadata)
                 self.upload_queue.put((filename, image_data, metadata, self.camera_id))
@@ -215,7 +215,7 @@ class CameraInstance:
         # Use new camera cleanup method
         self.camera.cleanup()
         
-        self.logger.info(f"Camera {self.camera_id}: Stopped")
+        self.logger.debug(f"Camera {self.camera_id}: Stopped")
 
 class CameraService:
     def __init__(self, config_path='/etc/sai-cam/config.yaml'):
@@ -257,9 +257,10 @@ class CameraService:
         # Prevent propagation to root logger (avoids duplicate output)
         self.logger.propagate = False
 
-        # Set the base log level from command line args or config
-        log_level = getattr(logging, self.config.get('logging', {}).get('level', 'INFO'))
-        self.logger.setLevel(log_level)
+        # Always start at INFO level during initialization to capture startup details
+        # Will switch to configured level (default: WARNING) after successful init
+        self.logger.setLevel(logging.INFO)
+        self._configured_log_level = self.config.get('logging', {}).get('level', 'WARNING')
 
         # Create a more structured formatter with consistent fields
         formatter = logging.Formatter(
@@ -288,8 +289,16 @@ class CameraService:
             self.logger.debug("Console logging disabled (service mode)")
 
         self.logger.info(f"Starting SAI Camera Service v{VERSION}")
-        self.logger.debug(f"Configuration loaded from: {self.config_path}")
-        self.logger.debug(f"Logging level set to: {logging.getLevelName(self.logger.level)}")
+        self.logger.info(f"Configuration loaded from: {self.config_path}")
+        self.logger.info(f"Startup log level: INFO (will switch to {self._configured_log_level} after init)")
+
+    def switch_to_production_logging(self):
+        """Switch from startup INFO level to configured production level (default: WARNING)"""
+        level = getattr(logging, self._configured_log_level, logging.WARNING)
+        self.logger.setLevel(level)
+        for handler in self.logger.handlers:
+            handler.setLevel(level)
+        self.logger.warning(f"Initialization complete - log level now {self._configured_log_level}")
 
     def setup_storage(self):
         """Initialize local storage system"""
@@ -385,9 +394,9 @@ class CameraService:
         """
         try:
             if is_retry:
-                self.logger.info(f"Retrying initialization for camera {cam_id}")
+                self.logger.debug(f"Retrying initialization for camera {cam_id}")
             else:
-                self.logger.info(f"Setting up camera {cam_id}")
+                self.logger.debug(f"Setting up camera {cam_id}")
 
             # Create camera instance
             instance = CameraInstance(
@@ -533,7 +542,7 @@ class CameraService:
                 if not self.upload_queue.empty():
                     filename, image_data, metadata, camera_id = self.upload_queue.get()
                     img_size = len(image_data) / 1024
-                    self.logger.info(f"Camera {camera_id}: Uploading {filename} ({img_size:.1f}KB) to {self.config['server']['url']}")
+                    self.logger.debug(f"Camera {camera_id}: Uploading {filename} ({img_size:.1f}KB)")
 
                     files = {
                         'image': (filename, image_data, 'image/jpeg'),
@@ -555,7 +564,7 @@ class CameraService:
                     if response.status_code == 200:
                         self.storage_manager.mark_as_uploaded(filename)
                         response_time = response.elapsed.total_seconds()
-                        self.logger.info(f"Successfully uploaded {filename} in {response_time:.2f}s")
+                        self.logger.debug(f"Uploaded {filename} ({response_time:.2f}s)")
                     else:
                         self.logger.error(f"Upload failed for {filename}: HTTP {response.status_code} - {response.text[:100]}")
 
@@ -594,6 +603,9 @@ class CameraService:
 
     def run(self):
         """Main service run method"""
+        # Switch from startup INFO to production log level (default: WARNING)
+        self.switch_to_production_logging()
+
         threads = [
             Thread(target=self.capture_images, name="CaptureCoordinator"),
             Thread(target=self.upload_images, name="UploadProcessor"),
@@ -645,13 +657,14 @@ class CameraService:
         old_config = self.config
 
         # 1. Logging level (safe to reload)
-        new_level = new_config.get('logging', {}).get('level', 'INFO')
-        old_level = old_config.get('logging', {}).get('level', 'INFO')
+        new_level = new_config.get('logging', {}).get('level', 'WARNING')
+        old_level = self._configured_log_level
         if new_level != old_level:
-            log_level = getattr(logging, new_level, logging.INFO)
+            log_level = getattr(logging, new_level, logging.WARNING)
             self.logger.setLevel(log_level)
             for handler in self.logger.handlers:
                 handler.setLevel(log_level)
+            self._configured_log_level = new_level
             changes.append(f"logging.level: {old_level} -> {new_level}")
 
         # 2. Monitoring thresholds (safe to reload)
@@ -885,7 +898,7 @@ class StorageManager:
                 self.logger.debug(f"Metadata saved to: {metadata_file}")
 
             img_size = len(image_data) / 1024
-            self.logger.info(f"Stored image: {filename} ({img_size:.1f}KB)")
+            self.logger.debug(f"Stored image: {filename} ({img_size:.1f}KB)")
             return True
         except Exception as e:
             self.logger.error(f"Failed to store image {filename}: {str(e)}", exc_info=True)
@@ -1081,7 +1094,7 @@ def main():
                         help='Path to config file (default: /etc/sai-cam/config.yaml)',
                         default='/etc/sai-cam/config.yaml')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                        help='Logging level (default: INFO)', default='INFO')
+                        help='Logging level (default: WARNING)', default='WARNING')
 
     # Testing options
     parser.add_argument('--local-save', action='store_true',

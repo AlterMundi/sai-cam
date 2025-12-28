@@ -1051,6 +1051,28 @@ footer p {
   cursor: not-allowed;
 }
 
+/* Log level button states */
+.btn-small.log-level-warning {
+  /* Default/off state - neutral appearance */
+  background: var(--card-bg);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+}
+
+.btn-small.log-level-info {
+  /* Active - orange highlight */
+  background: var(--warning-color);
+  border-color: var(--warning-color);
+  color: white;
+}
+
+.btn-small.log-level-debug {
+  /* Most verbose - stronger orange */
+  background: #e67e22;
+  border-color: #d35400;
+  color: white;
+}
+
 /* Connection Status Indicator */
 
 .header-status {

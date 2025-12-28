@@ -564,15 +564,16 @@ async function disableWifiAP() {
 }
 
 // Log level control functions
-
-let currentLogLevel = 'INFO';
+// Levels cycle: WARNING (default, production) → INFO → DEBUG → WARNING
+const LOG_LEVELS = ['WARNING', 'INFO', 'DEBUG'];
+let currentLogLevel = 'WARNING';
 
 async function fetchLogLevel() {
   try {
     const response = await fetch('/api/log_level');
     if (response.ok) {
       const data = await response.json();
-      currentLogLevel = data.level || 'INFO';
+      currentLogLevel = data.level || 'WARNING';
       updateLogLevelButton();
     }
   } catch (error) {
@@ -587,7 +588,10 @@ function updateLogLevelButton() {
     text.textContent = currentLogLevel;
   }
   if (btn) {
-    btn.className = `btn btn-small ${currentLogLevel === 'DEBUG' ? 'btn-active' : ''}`;
+    // Remove all level classes
+    btn.classList.remove('log-level-warning', 'log-level-info', 'log-level-debug');
+    // Add current level class
+    btn.classList.add(`log-level-${currentLogLevel.toLowerCase()}`);
   }
 }
 
@@ -595,7 +599,9 @@ async function toggleLogLevel() {
   const btn = document.getElementById('log-level-btn');
   if (!btn) return;
 
-  const newLevel = currentLogLevel === 'DEBUG' ? 'INFO' : 'DEBUG';
+  // Cycle to next level: WARNING → INFO → DEBUG → WARNING
+  const currentIndex = LOG_LEVELS.indexOf(currentLogLevel);
+  const newLevel = LOG_LEVELS[(currentIndex + 1) % LOG_LEVELS.length];
 
   btn.disabled = true;
 
@@ -611,7 +617,12 @@ async function toggleLogLevel() {
     if (response.ok && data.success) {
       currentLogLevel = newLevel;
       updateLogLevelButton();
-      showNotification(`Log level changed to ${newLevel}`, 'success');
+      const levelDescriptions = {
+        'WARNING': 'WARNING (only warnings & errors)',
+        'INFO': 'INFO (normal operation)',
+        'DEBUG': 'DEBUG (verbose)'
+      };
+      showNotification(`Log level: ${levelDescriptions[newLevel]}`, 'success');
     } else {
       showNotification(data.error || 'Failed to change log level', 'error');
     }
