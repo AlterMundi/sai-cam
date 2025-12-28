@@ -143,7 +143,7 @@ const BLOCKS = {
   'cameras': {
     title: 'Cameras',
     icon: '📷',
-    order: 3,
+    order: 4,
     detector: (status) => status.features.cameras && status.data.cameras.length > 0,
     render: function(data) {
       const cameras = data.cameras;
@@ -191,7 +191,7 @@ const BLOCKS = {
   'storage': {
     title: 'Storage',
     icon: '💾',
-    order: 4,
+    order: 5,
     detector: (status) => status.features.storage && status.data.storage !== null,
     render: function(data) {
       const storage = data.storage;
@@ -232,13 +232,13 @@ const BLOCKS = {
   'network': {
     title: 'Network',
     icon: '🌐',
-    order: 5,
+    order: 3,
     detector: (status) => status.data.network !== null,
     render: function(data) {
       const network = data.network;
       const mode = network.mode || 'ethernet';
-      const modeLabel = mode === 'wifi-client' ? 'WiFi Client' : 'Ethernet';
-      const modeIcon = mode === 'wifi-client' ? '📶' : '🔌';
+      const modeLabel = (mode === 'wifi-client' || mode === 'wifi') ? 'WiFi' : 'Ethernet';
+      const modeIcon = (mode === 'wifi-client' || mode === 'wifi') ? '📶' : '🔌';
 
       // Sort interfaces: WAN first, then others
       const sortedInterfaces = Object.entries(network.interfaces || {}).sort(([a], [b]) => {
@@ -295,7 +295,14 @@ const BLOCKS = {
       // Logs will be fetched separately
       return `
         <div class="block wide">
-          <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
+          <h3>
+            <span class="icon">${this.icon}</span> ${this.title}
+            <div class="log-level-toggle">
+              <button class="btn btn-small" id="log-level-btn" onclick="toggleLogLevel()">
+                <span id="log-level-text">INFO</span>
+              </button>
+            </div>
+          </h3>
           <div class="log-viewer" id="log-viewer">
             <div class="log-loading">Loading logs...</div>
           </div>
@@ -420,6 +427,9 @@ async function renderDashboard() {
   const loading = document.getElementById('loading');
   if (loading) loading.remove();
 
+  // On refresh, preserve log content to avoid flashing
+  const existingLogContent = document.getElementById('log-viewer')?.innerHTML;
+
   // Clear existing blocks if this is a refresh
   if (statusData !== null) {
     container.innerHTML = '';
@@ -435,11 +445,19 @@ async function renderDashboard() {
     }
   });
 
+  // Restore log content immediately to prevent flash
+  if (existingLogContent) {
+    const logViewer = document.getElementById('log-viewer');
+    if (logViewer) logViewer.innerHTML = existingLogContent;
+  }
+
+  // Update log level button to show current state
+  updateLogLevelButton();
+
   statusData = status;
 
-  // Fetch and update logs separately
-  const logs = await fetchLogs();
-  updateLogs(logs);
+  // Fetch and update logs in background (won't flash since content is preserved)
+  fetchLogs().then(logs => updateLogs(logs));
 }
 
 // WiFi AP control functions
@@ -545,6 +563,66 @@ async function disableWifiAP() {
   }
 }
 
+// Log level control functions
+
+let currentLogLevel = 'INFO';
+
+async function fetchLogLevel() {
+  try {
+    const response = await fetch('/api/log_level');
+    if (response.ok) {
+      const data = await response.json();
+      currentLogLevel = data.level || 'INFO';
+      updateLogLevelButton();
+    }
+  } catch (error) {
+    console.error('Error fetching log level:', error);
+  }
+}
+
+function updateLogLevelButton() {
+  const btn = document.getElementById('log-level-btn');
+  const text = document.getElementById('log-level-text');
+  if (text) {
+    text.textContent = currentLogLevel;
+  }
+  if (btn) {
+    btn.className = `btn btn-small ${currentLogLevel === 'DEBUG' ? 'btn-active' : ''}`;
+  }
+}
+
+async function toggleLogLevel() {
+  const btn = document.getElementById('log-level-btn');
+  if (!btn) return;
+
+  const newLevel = currentLogLevel === 'DEBUG' ? 'INFO' : 'DEBUG';
+
+  btn.disabled = true;
+
+  try {
+    const response = await fetch('/api/log_level', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: newLevel })
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      currentLogLevel = newLevel;
+      updateLogLevelButton();
+      showNotification(`Log level changed to ${newLevel}`, 'success');
+    } else {
+      showNotification(data.error || 'Failed to change log level', 'error');
+    }
+  } catch (error) {
+    console.error('Error setting log level:', error);
+    showNotification('Network error changing log level', 'error');
+  }
+
+  btn.disabled = false;
+}
+
 function showNotification(message, type = 'info') {
   // Create notification element
   const notification = document.createElement('div');
@@ -571,7 +649,9 @@ function showNotification(message, type = 'info') {
 // Initialize dashboard
 document.addEventListener('DOMContentLoaded', () => {
   renderDashboard();
+  fetchLogLevel();
 
   // Auto-refresh
   setInterval(renderDashboard, REFRESH_INTERVAL);
+  setInterval(fetchLogLevel, 30000);  // Refresh log level every 30s
 });

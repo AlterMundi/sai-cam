@@ -147,45 +147,47 @@ def get_system_info():
         return {}
 
 def get_camera_status():
-    """Get status of all configured cameras"""
+    """Get status of all configured cameras using health socket"""
     cameras = []
-    log_path = Path('/var/log/sai-cam/camera_service.log')
 
-    # Parse recent logs to get camera status
-    recent_logs = []
-    if log_path.exists():
-        try:
-            with open(log_path, 'r') as f:
-                recent_logs = f.readlines()[-200:]  # Last 200 lines
-        except:
-            pass
+    # Get real-time status from health socket
+    health_data = query_health_socket()
+    health_cameras = health_data.get('cameras', {}) if health_data else {}
+    failed_cameras = health_data.get('failed_cameras', {}) if health_data else {}
 
     for cam_config in config.get('cameras', []):
         cam_id = cam_config['id']
         cam_type = cam_config.get('type', 'unknown')
 
-        # Check if camera appears online in recent logs
-        online = False
-        error = None
-        last_capture = None
+        # Check camera status from health socket
+        cam_health = health_cameras.get(cam_id, {})
+        is_failed = cam_id in failed_cameras
 
-        for line in reversed(recent_logs):
-            if cam_id in line:
-                if 'Captured image' in line:
-                    online = True
-                    # Extract timestamp from log line
-                    try:
-                        timestamp_str = line.split('[')[0].strip()
-                        last_capture = timestamp_str
-                    except:
-                        last_capture = 'Recently'
-                    break
-                elif 'ERROR' in line and 'Failed to initialize' in line:
-                    error = 'Initialization failed'
-                    break
-                elif 'No route to host' in line:
-                    error = 'No route to host'
-                    break
+        # Camera is online if state is healthy and thread is alive
+        online = (cam_health.get('state') == 'healthy' and
+                  cam_health.get('thread_alive', False))
+
+        # Determine error message
+        error = None
+        if is_failed:
+            attempts = failed_cameras[cam_id].get('attempts', 0)
+            error = f'Failed to initialize (attempt {attempts})'
+        elif cam_health.get('state') == 'failing':
+            failures = cam_health.get('consecutive_failures', 0)
+            error = f'Failing ({failures} consecutive errors)'
+        elif cam_health.get('state') == 'offline':
+            error = 'Offline'
+
+        # Get last capture time from health data
+        last_capture = None
+        if cam_health.get('last_success_age') is not None:
+            age = cam_health['last_success_age']
+            if age < 60:
+                last_capture = f'{int(age)}s ago'
+            elif age < 3600:
+                last_capture = f'{int(age/60)}m ago'
+            else:
+                last_capture = f'{int(age/3600)}h ago'
 
         # Get storage location for thumbnails
         latest_image = None
@@ -272,14 +274,28 @@ def get_network_info():
         except:
             pass
 
-        # Get network mode from config
-        network_mode = config.get('network', {}).get('mode', 'ethernet')
+        # Detect WAN interface from default route (actual internet connection)
+        wan_interface = None
+        try:
+            result = subprocess.run(['ip', 'route', 'show', 'default'],
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0 and result.stdout:
+                # Parse: "default via 192.168.0.1 dev wlan0 ..."
+                parts = result.stdout.split()
+                if 'dev' in parts:
+                    wan_interface = parts[parts.index('dev') + 1]
+        except:
+            pass
 
-        # Determine WAN interface based on mode
-        if network_mode == 'wifi-client':
-            wan_interface = config.get('network', {}).get('wifi_client', {}).get('wifi_iface', 'wlan0')
-        else:
+        # Fallback to config if route detection fails
+        if not wan_interface:
             wan_interface = config.get('network', {}).get('interface', 'eth0')
+
+        # Determine mode from actual WAN interface type
+        if wan_interface and wan_interface.startswith('wl'):
+            network_mode = 'wifi'
+        else:
+            network_mode = 'ethernet'
 
         return {
             'interfaces': interfaces,
@@ -559,6 +575,71 @@ def api_health_system():
         'version': health.get('version'),
         'timestamp': health.get('timestamp')
     })
+
+
+@app.route('/api/log_level')
+def api_get_log_level():
+    """Get current log level from config"""
+    try:
+        current_level = config.get('logging', {}).get('level', 'INFO')
+        return jsonify({'level': current_level})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/log_level', methods=['POST'])
+def api_set_log_level():
+    """Set log level and send SIGHUP to camera service"""
+    import signal
+
+    data = request.get_json() or {}
+    new_level = data.get('level', '').upper()
+
+    if new_level not in ['DEBUG', 'INFO', 'WARNING', 'ERROR']:
+        return jsonify({'error': 'Invalid level. Use DEBUG, INFO, WARNING, or ERROR'}), 400
+
+    try:
+        # Update config file
+        config_path = Path('/etc/sai-cam/config.yaml')
+        if not config_path.exists():
+            return jsonify({'error': 'Config file not found'}), 500
+
+        # Read current config
+        with open(config_path, 'r') as f:
+            config_content = f.read()
+
+        # Replace log level using sed-like pattern
+        import re
+        new_content = re.sub(
+            r"(logging:\s*\n\s*level:\s*)['\"]?\w+['\"]?",
+            f"\\1'{new_level}'",
+            config_content
+        )
+
+        # Write updated config
+        with open(config_path, 'w') as f:
+            f.write(new_content)
+
+        # Reload our local config
+        load_config(str(config_path))
+
+        # Send SIGHUP to camera service
+        result = subprocess.run(
+            ['pgrep', '-f', 'camera_service.py'],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            pid = int(result.stdout.strip().split()[0])
+            os.kill(pid, signal.SIGHUP)
+            logger.info(f"Sent SIGHUP to camera_service (PID {pid}) for log level change to {new_level}")
+
+        return jsonify({'success': True, 'level': new_level})
+
+    except PermissionError:
+        return jsonify({'error': 'Permission denied. Config file not writable.'}), 403
+    except Exception as e:
+        logger.error(f"Failed to set log level: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 def main():
