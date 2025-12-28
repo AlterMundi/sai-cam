@@ -20,9 +20,13 @@ NotifyAccess=main
 # Startup timeout (time to send READY=1)
 TimeoutStartSec=120
 
-# Logging
-StandardOutput=append:${LOG_DIR}/service.log
-StandardError=append:${LOG_DIR}/error.log
+# Logging - Python handles file logging with rotation
+# Send stdout/stderr to journal only (avoids duplication with Python file logging)
+StandardOutput=journal
+StandardError=journal
+
+# Use SyslogIdentifier for cleaner journal entries
+SyslogIdentifier=sai-cam
 
 [Install]
 WantedBy=multi-user.target

@@ -85,24 +85,24 @@ class RTSPCamera(BaseCamera):
         """Capture frame from RTSP stream"""
         if not self.is_connected:
             return None
-        
+
         try:
             with self.lock:
                 if not self.cap or not self.cap.isOpened():
-                    self.logger.warning(f"Camera {self.camera_id}: RTSP stream not available")
+                    self.logger.debug(f"Camera {self.camera_id}: RTSP stream not available")
                     return None
-                
-                self.logger.debug(f"Camera {self.camera_id}: Capturing new RTSP frame")
+
+                self.logger.debug(f"Camera {self.camera_id}: Capturing RTSP frame")
                 ret, frame = self.cap.read()
-                
+
                 if not ret or frame is None:
-                    self.logger.warning(f"Camera {self.camera_id}: Failed to read RTSP frame")
+                    self.logger.debug(f"Camera {self.camera_id}: Failed to read RTSP frame")
                     return None
-                
+
                 return frame
-                
+
         except Exception as e:
-            self.logger.error(f"Camera {self.camera_id}: RTSP capture error: {str(e)}", exc_info=True)
+            self.logger.debug(f"Camera {self.camera_id}: RTSP capture error: {str(e)}")
             return None
     
     def grab_frame(self) -> bool:
@@ -122,16 +122,17 @@ class RTSPCamera(BaseCamera):
         """Attempt to reconnect to RTSP stream"""
         if not self.increment_reconnect_attempts():
             return False
-        
-        self.logger.warning(f"Camera {self.camera_id}: Attempting RTSP reconnection (attempt {self.reconnect_attempts})")
-        
+
+        # Debug level - CameraStateTracker logs consolidated status
+        self.logger.debug(f"Camera {self.camera_id}: RTSP reconnection attempt {self.reconnect_attempts}")
+
         # Clean up existing connection
         self.cleanup()
-        
+
         # Wait before reconnecting
         reconnect_delay = self.global_config.get('advanced', {}).get('reconnect_delay', 5)
         time.sleep(reconnect_delay)
-        
+
         # Attempt to reconnect
         return self.setup()
     

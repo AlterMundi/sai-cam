@@ -119,24 +119,24 @@ class USBCamera(BaseCamera):
         """Capture frame from USB camera"""
         if not self.is_connected:
             return None
-        
+
         try:
             with self.lock:
                 if not self.cap or not self.cap.isOpened():
-                    self.logger.warning(f"Camera {self.camera_id}: USB camera not available")
+                    self.logger.debug(f"Camera {self.camera_id}: USB camera not available")
                     return None
-                
-                self.logger.debug(f"Camera {self.camera_id}: Capturing new USB frame")
+
+                self.logger.debug(f"Camera {self.camera_id}: Capturing USB frame")
                 ret, frame = self.cap.read()
-                
+
                 if not ret or frame is None:
-                    self.logger.warning(f"Camera {self.camera_id}: Failed to read USB frame")
+                    self.logger.debug(f"Camera {self.camera_id}: Failed to read USB frame")
                     return None
-                
+
                 return frame
-                
+
         except Exception as e:
-            self.logger.error(f"Camera {self.camera_id}: USB capture error: {str(e)}", exc_info=True)
+            self.logger.debug(f"Camera {self.camera_id}: USB capture error: {str(e)}")
             return None
     
     def set_camera_property(self, prop: int, value: float) -> bool:
@@ -183,16 +183,17 @@ class USBCamera(BaseCamera):
         """Attempt to reconnect to USB camera"""
         if not self.increment_reconnect_attempts():
             return False
-        
-        self.logger.warning(f"Camera {self.camera_id}: Attempting USB reconnection (attempt {self.reconnect_attempts})")
-        
+
+        # Debug level - CameraStateTracker logs consolidated status
+        self.logger.debug(f"Camera {self.camera_id}: USB reconnection attempt {self.reconnect_attempts}")
+
         # Clean up existing connection
         self.cleanup()
-        
+
         # Wait before reconnecting
         reconnect_delay = self.global_config.get('advanced', {}).get('reconnect_delay', 5)
         time.sleep(reconnect_delay)
-        
+
         # Attempt to reconnect
         return self.setup()
     

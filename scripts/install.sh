@@ -673,6 +673,7 @@ sudo cp $PROJECT_ROOT/src/camera_service.py $INSTALL_DIR/bin/
 echo "📦 Installing camera modules..."
 sudo cp -r $PROJECT_ROOT/src/cameras $INSTALL_DIR/
 sudo cp $PROJECT_ROOT/src/config_helper.py $INSTALL_DIR/
+sudo cp $PROJECT_ROOT/src/logging_utils.py $INSTALL_DIR/
 
 # Copy status portal
 echo "🌐 Installing status portal..."
@@ -868,9 +869,10 @@ sudo chmod 644 /etc/systemd/system/sai-cam.service
 sudo chmod 644 /etc/logrotate.d/sai-cam
 sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
 
-# Set permissions for new camera modules
+# Set permissions for new camera modules and utilities
 sudo find $INSTALL_DIR/cameras -name "*.py" -exec chmod 644 {} \;
 sudo chmod 644 $INSTALL_DIR/config_helper.py
+sudo chmod 644 $INSTALL_DIR/logging_utils.py
 
 # Set permissions for status portal
 sudo chmod 755 $INSTALL_DIR/status_portal.py

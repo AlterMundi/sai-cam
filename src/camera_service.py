@@ -23,9 +23,19 @@ from systemd import daemon
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import numpy as np
-# ONVIF and HTTP auth now handled by camera modules
 
-VERSION = "0.1.0"  # Version bump for multi-camera support
+# Set up path for deployed environment before local imports
+# In deployment: /opt/sai-cam/bin/camera_service.py needs to find /opt/sai-cam/logging_utils.py
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_current_dir)
+for _path in [_current_dir, _parent_dir]:
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+# Import logging utilities
+from logging_utils import RateLimitedLogger, CameraStateTracker
+
+VERSION = "0.2.1"  # Added camera retry on init failure
 
 # Force FFMPEG to use TCP transport for all RTSP connections
 # Default: H.264 for broad compatibility (EZViz cameras, Raspberry Pi 3B)
@@ -36,7 +46,7 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h2
 
 class CameraInstance:
     """Represents a single camera instance with its own configuration and state"""
-    
+
     def __init__(self, camera_id, camera_config, global_config, logger, storage_manager, upload_queue):
         self.camera_id = camera_id
         self.config = camera_config
@@ -45,20 +55,19 @@ class CameraInstance:
         self.storage_manager = storage_manager
         self.upload_queue = upload_queue
         self.running = True
-        self.timestamp_last_image = time.time() - self.config.get('capture_interval', 300)
-        
-        # Import and create camera using new architecture
-        import sys
-        import os
-        # Add current directory to path to find cameras module in deployed environment
-        current_dir = os.path.dirname(__file__)
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        # Add parent directory as well for when running from bin/ subdirectory
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-            
+
+        # Get capture interval for this camera
+        self.capture_interval = self.config.get('capture_interval', 300)
+        self.timestamp_last_image = time.time() - self.capture_interval
+
+        # Initialize state tracker for backoff management
+        self.state_tracker = CameraStateTracker(
+            camera_id=camera_id,
+            capture_interval=self.capture_interval,
+            logger=logger
+        )
+
+        # Import camera factory (path already configured at module level)
         from cameras import create_camera_from_config
         self.camera = create_camera_from_config(camera_config, global_config, logger)
         self.camera_type = camera_config.get('type', 'rtsp')
@@ -76,37 +85,51 @@ class CameraInstance:
     
         
     def capture_images(self):
-        """Capture images from this specific camera"""
+        """Capture images from this specific camera with backoff for failures"""
         polling_interval = self.global_config.get('advanced', {}).get('polling_interval', 0.1)
-        
+
         while self.running:
             try:
                 current_time = time.time()
-                interval = self.config.get('capture_interval', 300)
-                
-                if current_time - self.timestamp_last_image < interval:
+
+                # Check if camera is in backoff period (offline/failing)
+                if not self.state_tracker.should_attempt_capture():
+                    # For RTSP cameras, still grab frames to keep stream alive
+                    if self.camera_type == 'rtsp' and hasattr(self.camera, 'grab_frame'):
+                        self.camera.grab_frame()
+                    time.sleep(polling_interval)
+                    continue
+
+                # Check if it's time for scheduled capture
+                if current_time - self.timestamp_last_image < self.capture_interval:
                     # For RTSP cameras, grab frames to keep stream alive
                     if self.camera_type == 'rtsp' and hasattr(self.camera, 'grab_frame'):
                         self.camera.grab_frame()
                     time.sleep(polling_interval)
                     continue
-                
-                # Capture frame using new unified interface
+
+                # Capture frame using unified interface
                 frame = self.camera.capture_frame()
-                
+
                 if frame is None or not self.camera.validate_frame(frame):
-                    self.logger.warning(f"Camera {self.camera_id}: Failed to capture valid frame")
-                    if not self.camera.reconnect():
-                        self.logger.error(f"Camera {self.camera_id}: Reconnection failed")
-                    time.sleep(1)
+                    # Record failure and check if we should attempt reconnection
+                    if self.state_tracker.record_failure("failed to capture valid frame"):
+                        # Attempt reconnection (camera.reconnect handles its own retry logic)
+                        self.camera.reconnect()
+                    # Sleep for backoff period
+                    wait_time = min(self.state_tracker.time_until_next_attempt(), 10)
+                    time.sleep(max(wait_time, 1))
                     continue
-                
-                # Add timestamp and camera ID
+
+                # Success! Record it to reset backoff
+                self.state_tracker.record_success()
+
+                # Add timestamp and camera ID overlay
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 cv2.putText(frame, f"{self.camera_id}: {timestamp}", (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                
-                # Add metadata
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+                # Build metadata
                 metadata = {
                     'timestamp': timestamp,
                     'device_id': self.global_config['device']['id'],
@@ -115,27 +138,26 @@ class CameraInstance:
                     'version': VERSION,
                     'camera_type': self.camera_type
                 }
-                
-                # Encode and compress
+
+                # Encode image
                 _, buffer = cv2.imencode('.jpg', frame)
                 image_data = buffer.tobytes()
-                
-                # Store locally and queue for upload
+
+                # Store and queue for upload
                 filename = f"{self.camera_id}_{timestamp}.jpg"
                 img_size = len(image_data) / 1024
-                self.logger.info(f"Camera {self.camera_id}: Captured image {filename} ({img_size:.1f}KB)")
-                
+                self.logger.info(f"Camera {self.camera_id}: Captured {filename} ({img_size:.1f}KB)")
+
                 self.storage_manager.store_image(image_data, filename, metadata)
-                
-                # Add to upload queue if uploads are enabled
                 self.upload_queue.put((filename, image_data, metadata, self.camera_id))
-                
+
                 # Update timestamp for next capture
                 self.timestamp_last_image = current_time
-                self.logger.debug(f"Camera {self.camera_id}: Next capture in {interval}s")
-                
+                self.logger.debug(f"Camera {self.camera_id}: Next capture in {self.capture_interval}s")
+
             except Exception as e:
-                self.logger.error(f"Camera {self.camera_id}: Capture error: {str(e)}", exc_info=True)
+                self.state_tracker.record_failure(f"exception: {str(e)}")
+                self.logger.debug(f"Camera {self.camera_id}: Capture exception details", exc_info=True)
                 time.sleep(1)
     
     
@@ -155,6 +177,7 @@ class CameraService:
         self.upload_enabled = True
         self.camera_instances = {}
         self.camera_threads = {}
+        self.failed_cameras = {}  # Track cameras that failed initialization: {cam_id: (config, attempts, next_retry_time)}
         self.load_config()
         self.setup_logging()
         self.setup_storage()
@@ -181,7 +204,10 @@ class CameraService:
         # Clear any existing handlers to prevent duplicates
         if self.logger.handlers:
             self.logger.handlers = []
-            
+
+        # Prevent propagation to root logger (avoids duplicate output)
+        self.logger.propagate = False
+
         # Set the base log level from command line args or config
         log_level = getattr(logging, self.config.get('logging', {}).get('level', 'INFO'))
         self.logger.setLevel(log_level)
@@ -201,10 +227,16 @@ class CameraService:
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
 
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        # Only add console handler if running interactively (not as systemd service)
+        # When running as service, stdout/stderr go to journal or file anyway
+        is_interactive = sys.stdout.isatty() or os.environ.get('SAI_CAM_CONSOLE_LOG', '') == '1'
+        if is_interactive:
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            self.logger.addHandler(console_handler)
+            self.logger.debug("Console logging enabled (interactive mode)")
+        else:
+            self.logger.debug("Console logging disabled (service mode)")
 
         self.logger.info(f"Starting SAI Camera Service v{VERSION}")
         self.logger.debug(f"Configuration loaded from: {self.config_path}")
@@ -265,33 +297,146 @@ class CameraService:
             # Initialize each camera instance
             for cam_config in cameras_config:
                 cam_id = cam_config['id']
-                self.logger.info(f"Setting up camera {cam_id}")
-                
-                # Create camera instance
-                instance = CameraInstance(
-                    camera_id=cam_id,
-                    camera_config=cam_config,
-                    global_config=self.config,
-                    logger=self.logger,
-                    storage_manager=self.storage_manager,
-                    upload_queue=self.upload_queue
+                self._try_initialize_camera(cam_id, cam_config)
+
+            total_cameras = len(cameras_config)
+            active_cameras = len(self.camera_instances)
+            failed_cameras = len(self.failed_cameras)
+
+            if active_cameras == 0 and failed_cameras > 0:
+                # All cameras failed but we'll retry them - don't exit
+                self.logger.warning(
+                    f"No cameras initialized successfully ({failed_cameras} failed). "
+                    f"Will retry failed cameras periodically."
                 )
-                
-                # Initialize camera
-                if instance.setup_camera():
-                    self.camera_instances[cam_id] = instance
-                else:
-                    self.logger.error(f"Failed to initialize camera {cam_id}")
-            
-            if not self.camera_instances:
-                self.logger.error("No cameras were successfully initialized")
+            elif active_cameras == 0:
+                self.logger.error("No cameras configured or all failed permanently")
                 sys.exit(1)
-                
-            self.logger.info(f"Successfully initialized {len(self.camera_instances)} cameras")
+            else:
+                self.logger.info(
+                    f"Initialized {active_cameras}/{total_cameras} cameras"
+                    + (f" ({failed_cameras} will retry)" if failed_cameras > 0 else "")
+                )
 
         except Exception as e:
             self.logger.error(f"Camera initialization error: {str(e)}", exc_info=True)
             sys.exit(1)
+
+    def _try_initialize_camera(self, cam_id: str, cam_config: dict, is_retry: bool = False) -> bool:
+        """
+        Try to initialize a single camera.
+
+        Args:
+            cam_id: Camera identifier
+            cam_config: Camera configuration dict
+            is_retry: True if this is a retry attempt
+
+        Returns:
+            True if successful, False if failed
+        """
+        try:
+            if is_retry:
+                self.logger.info(f"Retrying initialization for camera {cam_id}")
+            else:
+                self.logger.info(f"Setting up camera {cam_id}")
+
+            # Create camera instance
+            instance = CameraInstance(
+                camera_id=cam_id,
+                camera_config=cam_config,
+                global_config=self.config,
+                logger=self.logger,
+                storage_manager=self.storage_manager,
+                upload_queue=self.upload_queue
+            )
+
+            # Initialize camera
+            if instance.setup_camera():
+                self.camera_instances[cam_id] = instance
+                # Remove from failed list if it was there
+                if cam_id in self.failed_cameras:
+                    del self.failed_cameras[cam_id]
+                    self.logger.info(f"Camera {cam_id}: Successfully recovered")
+                return True
+            else:
+                self._record_camera_failure(cam_id, cam_config)
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Camera {cam_id}: Initialization exception: {str(e)}")
+            self._record_camera_failure(cam_id, cam_config)
+            return False
+
+    def _record_camera_failure(self, cam_id: str, cam_config: dict):
+        """Record a camera initialization failure and schedule retry."""
+        capture_interval = cam_config.get('capture_interval', 300)
+
+        if cam_id in self.failed_cameras:
+            # Increment attempts and calculate next retry with exponential backoff
+            config, attempts, _ = self.failed_cameras[cam_id]
+            attempts += 1
+            # Backoff: 1x, 2x, 4x, 8x, 12x (max) of capture_interval
+            multiplier = min(2 ** (attempts - 1), 12)
+        else:
+            attempts = 1
+            multiplier = 1
+
+        retry_interval = capture_interval * multiplier
+        next_retry = time.time() + retry_interval
+
+        self.failed_cameras[cam_id] = (cam_config, attempts, next_retry)
+        self.logger.warning(
+            f"Camera {cam_id}: Failed to initialize (attempt {attempts}), "
+            f"will retry in {retry_interval}s ({multiplier}x interval)"
+        )
+
+    def retry_failed_cameras(self):
+        """Periodically retry initializing failed cameras."""
+        # Use rate-limited logger for status updates
+        rl_logger = RateLimitedLogger(self.logger, default_interval=300)
+
+        while self.running:
+            try:
+                if not self.failed_cameras:
+                    time.sleep(30)
+                    continue
+
+                now = time.time()
+                cameras_to_retry = []
+
+                # Find cameras ready for retry
+                for cam_id, (cam_config, attempts, next_retry) in list(self.failed_cameras.items()):
+                    if now >= next_retry:
+                        cameras_to_retry.append((cam_id, cam_config))
+
+                # Retry each camera
+                for cam_id, cam_config in cameras_to_retry:
+                    if self._try_initialize_camera(cam_id, cam_config, is_retry=True):
+                        # Start capture thread for newly initialized camera
+                        if cam_id in self.camera_instances:
+                            instance = self.camera_instances[cam_id]
+                            thread = Thread(
+                                target=instance.capture_images,
+                                name=f"Camera-{cam_id}"
+                            )
+                            thread.daemon = True
+                            thread.start()
+                            self.camera_threads[cam_id] = thread
+                            self.logger.info(f"Started capture thread for recovered camera {cam_id}")
+
+                # Log status periodically if there are still failed cameras
+                if self.failed_cameras:
+                    failed_list = ', '.join(self.failed_cameras.keys())
+                    rl_logger.info(
+                        f"Cameras pending retry: {failed_list}",
+                        key="failed_cameras_status"
+                    )
+
+                time.sleep(10)  # Check every 10 seconds
+
+            except Exception as e:
+                self.logger.error(f"Camera retry thread error: {str(e)}", exc_info=True)
+                time.sleep(60)
 
     def start_capture_threads(self):
         """Start capture threads for all camera instances"""
@@ -404,7 +549,8 @@ class CameraService:
             Thread(target=self.capture_images, name="CaptureCoordinator"),
             Thread(target=self.upload_images, name="UploadProcessor"),
             Thread(target=self.health_monitor.run, name="HealthMonitor"),
-            Thread(target=self.storage_manager.run_cleanup_thread, name="StorageManager")
+            Thread(target=self.storage_manager.run_cleanup_thread, name="StorageManager"),
+            Thread(target=self.retry_failed_cameras, name="CameraRetry")
         ]
 
         if self.watchdog_usec:
@@ -694,30 +840,35 @@ def main():
 
     # Service configuration
     parser.add_argument('--config', type=str,
-                       help='Path to config file (default: /etc/sai-cam/config.yaml)',
-                       default='/etc/sai-cam/config.yaml')
+                        help='Path to config file (default: /etc/sai-cam/config.yaml)',
+                        default='/etc/sai-cam/config.yaml')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                       help='Logging level (default: INFO)', default='INFO')
-    
+                        help='Logging level (default: INFO)', default='INFO')
+
     # Testing options
     parser.add_argument('--local-save', action='store_true',
-                       help='Save images locally without uploading')
+                        help='Save images locally without uploading')
     parser.add_argument('--dry-run', action='store_true',
-                       help='Initialize camera and exit (testing only)')
+                        help='Initialize camera and exit (testing only)')
 
     args = parser.parse_args()
 
-    # Configure logging first
-    logging.basicConfig(level=getattr(logging, args.log_level))
-    logger = logging.getLogger('SAICam')
+    # Minimal early logging setup (will be replaced by CameraService.setup_logging)
+    # Only log critical startup errors before proper logging is configured
+    early_logger = logging.getLogger('SAICam.startup')
+    early_logger.setLevel(getattr(logging, args.log_level))
+    if not early_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+        early_logger.addHandler(handler)
 
     try:
-        # Initialize service
+        # Initialize service (this sets up proper logging)
         service = CameraService(config_path=args.config)
 
         # Handle testing options
         if args.dry_run:
-            logger.info("Dry run completed successfully")
+            service.logger.info("Dry run completed successfully")
             return
 
         if args.local_save:
@@ -727,7 +878,7 @@ def main():
         service.run()
 
     except Exception as e:
-        logger.error(f"Failed to start service: {e}")
+        early_logger.error(f"Failed to start service: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':

@@ -173,60 +173,64 @@ class ONVIFCameraImpl(BaseCamera):
     def capture_frame(self) -> Optional[np.ndarray]:
         """Capture snapshot from ONVIF camera"""
         if not self.is_connected or not self.snapshot_uri:
-            self.logger.error(f"Camera {self.camera_id}: Not connected or no snapshot URI available")
+            # Debug level - CameraStateTracker handles user-visible logging
+            self.logger.debug(f"Camera {self.camera_id}: Not connected or no snapshot URI")
             return None
-        
+
         try:
             self.logger.debug(f"Camera {self.camera_id}: Downloading ONVIF snapshot")
-            
+
             # Download snapshot using HTTP Digest authentication
             response = requests.get(
                 self.snapshot_uri,
                 auth=HTTPDigestAuth(self.username, self.password),
                 timeout=self.timeout
             )
-            
+
             if response.status_code == 200:
                 # Convert image bytes to OpenCV format
                 nparr = np.frombuffer(response.content, np.uint8)
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
+
                 if frame is not None:
-                    self.logger.debug(f"Camera {self.camera_id}: Successfully captured ONVIF snapshot")
+                    self.logger.debug(f"Camera {self.camera_id}: ONVIF snapshot captured")
                     return frame
                 else:
-                    self.logger.error(f"Camera {self.camera_id}: Failed to decode image data")
+                    self.logger.debug(f"Camera {self.camera_id}: Failed to decode image data")
                     return None
             else:
-                self.logger.error(f"Camera {self.camera_id}: ONVIF snapshot failed: HTTP {response.status_code}")
+                # Log HTTP errors at debug level (CameraStateTracker handles consolidated logging)
+                self.logger.debug(f"Camera {self.camera_id}: ONVIF snapshot HTTP {response.status_code}")
                 if response.status_code == 401:
-                    self.logger.error(f"Camera {self.camera_id}: Authentication failed - check credentials")
+                    # Auth errors are more serious - log at warning but still rate-limited by caller
+                    self.logger.warning(f"Camera {self.camera_id}: Authentication failed - check credentials")
                 return None
-                
+
         except requests.exceptions.Timeout:
-            self.logger.error(f"Camera {self.camera_id}: Timeout while capturing ONVIF snapshot")
+            self.logger.debug(f"Camera {self.camera_id}: ONVIF snapshot timeout")
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error(f"Camera {self.camera_id}: Connection error during ONVIF capture")
+            self.logger.debug(f"Camera {self.camera_id}: ONVIF connection error")
             return None
         except Exception as e:
-            self.logger.error(f"Camera {self.camera_id}: ONVIF capture error: {str(e)}", exc_info=True)
+            self.logger.debug(f"Camera {self.camera_id}: ONVIF capture error: {str(e)}")
             return None
     
     def reconnect(self) -> bool:
         """Attempt to reconnect to ONVIF camera"""
         if not self.increment_reconnect_attempts():
             return False
-        
-        self.logger.warning(f"Camera {self.camera_id}: Attempting ONVIF reconnection (attempt {self.reconnect_attempts})")
-        
+
+        # Debug level - CameraStateTracker logs consolidated status
+        self.logger.debug(f"Camera {self.camera_id}: ONVIF reconnection attempt {self.reconnect_attempts}")
+
         # Clean up existing connection
         self.cleanup()
-        
+
         # Wait before reconnecting
         reconnect_delay = self.global_config.get('advanced', {}).get('reconnect_delay', 5)
         time.sleep(reconnect_delay)
-        
+
         # Attempt to reconnect
         return self.setup()
     

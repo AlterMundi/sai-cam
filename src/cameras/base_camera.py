@@ -131,13 +131,13 @@ class BaseCamera(ABC):
     def increment_reconnect_attempts(self) -> bool:
         """
         Increment reconnection attempt counter
-        
+
         Returns:
             bool: True if should continue attempting, False if max reached
         """
         self.reconnect_attempts += 1
         if self.reconnect_attempts >= self.max_reconnect_attempts:
-            self.logger.error(f"Camera {self.camera_id}: Max reconnection attempts ({self.max_reconnect_attempts}) reached")
+            # Don't log here - CameraStateTracker handles consolidated logging
             return False
         return True
     
