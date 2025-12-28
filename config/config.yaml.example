@@ -85,9 +85,9 @@ cameras:
 
 storage:
   base_path: '/opt/sai-cam/storage'
-  max_size_gb: 5
-  cleanup_threshold_gb: 4.5
-  retention_days: 7
+  max_size_gb: 20              # Hard limit - triggers forced cleanup
+  cleanup_threshold_gb: 18     # Target size after cleanup (90% of max)
+  retention_days: 7            # Keep uploaded files for this many days
 
 server:
   url: 'https://your-server.com/webhook/endpoint'
