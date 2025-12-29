@@ -1,7 +1,5 @@
 /* SAI-Cam Status Portal Styles - SAI Visual Identity v2 */
-
-/* Import fonts */
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Roboto:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Fonts loaded via HTML <link> tags for non-blocking load */
 
 :root {
   /* SAI Color Palette */
@@ -45,7 +43,7 @@
 }
 
 body {
-  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-weight: 400;
   background: var(--sai-forest);
   background-image:
@@ -95,7 +93,7 @@ header {
 }
 
 .title-section h1 {
-  font-family: 'Montserrat', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 1.6em;
   font-weight: 700;
   margin-bottom: 2px;
@@ -142,7 +140,7 @@ header {
   background: rgba(13, 47, 40, 0.8);
   border: 1px solid var(--card-border);
   border-radius: 6px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.9em;
   font-weight: 500;
   transition: all 0.2s ease;
@@ -214,7 +212,7 @@ main {
 }
 
 .block h3 {
-  font-family: 'Montserrat', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 1.1em;
   font-weight: 600;
   margin-bottom: 16px;
@@ -232,7 +230,7 @@ main {
   font-size: 0.7em;
   color: var(--sai-text-muted);
   font-weight: 400;
-  font-family: 'Roboto', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
 /* Gauges */
@@ -296,7 +294,7 @@ main {
 
 .percentage {
   fill: var(--sai-text);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.45em;
   font-weight: 500;
   text-anchor: middle;
@@ -306,11 +304,11 @@ main {
   font-size: 0.7em;
   color: var(--sai-text-muted);
   margin-top: 4px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
 }
 
 .gauge-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 1.8em;
   font-weight: 500;
   color: var(--success-color);
@@ -331,7 +329,7 @@ main {
   border: 1px solid var(--card-border);
   border-radius: 8px;
   font-weight: 500;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.9em;
 }
 
@@ -364,7 +362,7 @@ main {
 }
 
 .metric-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 1.2em;
   font-weight: 500;
   color: var(--sai-text);
@@ -420,14 +418,14 @@ main {
 }
 
 .camera-header h4 {
-  font-family: 'Montserrat', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 0.95em;
   font-weight: 600;
   color: var(--sai-text);
 }
 
 .camera-type {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.65em;
   color: var(--sai-text-muted);
   text-transform: uppercase;
@@ -484,7 +482,7 @@ main {
 .camera-info small {
   font-size: 0.65em;
   color: var(--sai-text-muted);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
 }
 
 .camera-address small {
@@ -493,7 +491,7 @@ main {
   display: block;
   text-align: center;
   margin-top: 4px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
 }
 
 /* Badge */
@@ -539,7 +537,7 @@ main {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.75em;
   font-weight: 500;
   color: var(--sai-text);
@@ -623,7 +621,7 @@ main {
 }
 
 .interface-badge {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.55em;
   padding: 2px 5px;
   border-radius: 3px;
@@ -638,13 +636,13 @@ main {
 }
 
 .interface-ip {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.8em;
   color: var(--sai-text);
 }
 
 .interface-type {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.65em;
   color: var(--sai-text-muted);
   text-transform: uppercase;
@@ -660,7 +658,7 @@ main {
   padding: 14px;
   max-height: 360px;
   overflow-y: auto;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.75em;
   line-height: 1.7;
 }
@@ -775,7 +773,7 @@ footer p {
   justify-content: center;
   gap: 8px;
   padding: 10px 20px;
-  font-family: 'Montserrat', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 0.85em;
   font-weight: 600;
   border: 2px solid transparent;
@@ -905,7 +903,7 @@ footer p {
 
 .btn-small {
   padding: 4px 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.65em;
   border-radius: 4px;
   background: transparent;
@@ -980,7 +978,7 @@ footer p {
 
 .connection-status .status-text {
   font-weight: 500;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.95em;
 }
 
@@ -1247,7 +1245,7 @@ footer p {
 /* Stats highlight - Orange accent numbers */
 .stat-highlight {
   color: var(--sai-orange);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-weight: 600;
 }
 
