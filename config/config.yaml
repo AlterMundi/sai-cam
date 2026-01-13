@@ -6,7 +6,7 @@
 # mode: 'wifi-client' - Internet via WiFi, Ethernet for local cameras only (no WiFi AP)
 network:
   mode: 'ethernet'              # 'ethernet' or 'wifi-client'
-  node_ip: '192.168.220.70/24'  # Fixed IP for this node (static in wifi-client mode)
+  node_ip: '192.168.220.1/24'  # Fixed IP for this node (static in wifi-client mode)
   interface: 'eth0'             # Network interface for cameras
   connection_name: 'saicam'     # NetworkManager connection name
   gateway: ''                   # Optional gateway for ethernet (leave empty for DHCP)
@@ -24,7 +24,7 @@ system:
 
 # Device identification
 device:
-  id: 'sai-cam-node-07'        # Unique node identifier
+  id: 'sai-cam-node-01'        # Unique node identifier
   location: 'Molinari'     # Deployment location
   description: 'SAI-Cam Edge Node'
 
@@ -32,7 +32,7 @@ device:
 cameras:
   - id: 'cam1'
     type: 'onvif'
-    address: '192.168.220.71'
+    address: '192.168.220.10'
     port: 8000
     username: 'admin'
     password: 'Saicam1!'
@@ -41,7 +41,7 @@ cameras:
     
   - id: 'cam2'
     type: 'onvif'
-    address: '192.168.220.72'
+    address: '192.168.220.20'
     port: 8000
     username: 'admin'
     password: 'Saicam1!'
@@ -50,7 +50,7 @@ cameras:
     
   - id: 'cam3'
     type: 'onvif'
-    address: '192.168.220.73'
+    address: '192.168.220.30'
     port: 8000
     username: 'admin'
     password: 'Saicam1!'
@@ -59,28 +59,10 @@ cameras:
     
   - id: 'cam4'
     type: 'onvif'
-    address: '192.168.220.74'
+    address: '192.168.220.40'
     port: 8000
     username: 'admin'
     password: 'Saicam1!'
-    capture_interval: 300
-    position: 'west'
-
-# source="""rtsp://admin:Saicam1!@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0""",  ## DAHUA
-  - id: 'cam5'
-    type: 'rtsp'
-    rtsp_url: 'rtsp://admin:Saicam1!@192.168.220.10:554/cam/realmonitor?channel=1&subtype=0'
-    address: '192.168.220.10'
-    port: 554
-    username: 'admin'
-    password: 'Saicam1!'
-    capture_interval: 300
-    position: 'west'
-
-  - id: 'cam6'
-    type: 'usb'
-    device_index: 0
-    # device_path: /dev/video0
     capture_interval: 300
     position: 'west'
 
