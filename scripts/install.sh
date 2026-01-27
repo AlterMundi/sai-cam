@@ -289,6 +289,18 @@ WIFI_COUNTRY_CODE=$(read_config_value "wifi_ap.country_code" "AR")
 SYSTEM_USER=$(read_config_value "system.user" "$DEFAULT_USER")
 SYSTEM_GROUP=$(read_config_value "system.group" "$DEFAULT_GROUP")
 
+# Load AP network settings from .env (with defaults)
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    AP_IP=$(grep "^AP_IP=" "$PROJECT_ROOT/.env" | cut -d'=' -f2)
+    AP_NETMASK=$(grep "^AP_NETMASK=" "$PROJECT_ROOT/.env" | cut -d'=' -f2)
+    DHCP_RANGE_START=$(grep "^DHCP_RANGE_START=" "$PROJECT_ROOT/.env" | cut -d'=' -f2)
+    DHCP_RANGE_END=$(grep "^DHCP_RANGE_END=" "$PROJECT_ROOT/.env" | cut -d'=' -f2)
+fi
+AP_IP=${AP_IP:-192.168.230.1}
+AP_NETMASK=${AP_NETMASK:-24}
+DHCP_RANGE_START=${DHCP_RANGE_START:-192.168.230.100}
+DHCP_RANGE_END=${DHCP_RANGE_END:-192.168.230.125}
+
 # Function to check if required files exist
 check_required_files() {
     local required_files=()
@@ -805,7 +817,7 @@ elif iw dev wlan0 info > /dev/null 2>&1; then
         mode ap \
         ssid "SAI-Node-$DEVICE_ID" \
         ipv4.method shared \
-        ipv4.address 192.168.4.1/24 \
+        ipv4.address $AP_IP/$AP_NETMASK \
         wifi-sec.key-mgmt wpa-psk \
         wifi-sec.psk "$WIFI_PASSWORD" > /dev/null 2>&1
 
@@ -829,9 +841,11 @@ elif iw dev wlan0 info > /dev/null 2>&1; then
     # Configure captive portal DNS hijacking
     echo "🌐 Configuring captive portal..."
     sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d
-    sudo cp "$PROJECT_ROOT/config/captive-portal-dnsmasq.conf" /etc/NetworkManager/dnsmasq-shared.d/
+    # Generate config with AP_IP from .env (replaces __AP_IP__ placeholder)
+    sed "s/__AP_IP__/$AP_IP/g" "$PROJECT_ROOT/config/captive-portal-dnsmasq.conf" \
+        | sudo tee /etc/NetworkManager/dnsmasq-shared.d/captive-portal-dnsmasq.conf > /dev/null
     sudo chmod 644 /etc/NetworkManager/dnsmasq-shared.d/captive-portal-dnsmasq.conf
-    echo "✅ Captive portal DNS configuration installed"
+    echo "✅ Captive portal DNS configured (AP: $AP_IP)"
 
     # Restart NetworkManager to reinitialize WiFi interface and load dnsmasq config
     echo "🔄 Restarting NetworkManager..."
@@ -844,8 +858,8 @@ elif iw dev wlan0 info > /dev/null 2>&1; then
         echo "✅ WiFi AP configured and activated successfully"
         echo "   SSID: SAI-Node-$DEVICE_ID"
         echo "   Password: $WIFI_PASSWORD"
-        echo "   IP: 192.168.4.1"
-        echo "   DHCP: 192.168.4.10-254 (managed by NetworkManager)"
+        echo "   IP: $AP_IP"
+        echo "   DHCP: $DHCP_RANGE_START-${DHCP_RANGE_END##*.} (managed by NetworkManager)"
         echo "   Captive Portal: Enabled (auto-redirect to status portal)"
     else
         echo "⚠️  WiFi AP connection created but failed to activate"
@@ -920,8 +934,11 @@ echo "--------------------------"
 
 # Install portal nginx configuration (serves portal on port 80)
 echo "🔧 Installing portal nginx configuration..."
-sudo cp "$PROJECT_ROOT/config/portal-nginx.conf" /etc/nginx/sites-available/portal-nginx.conf
+# Generate config with AP_IP from .env (replaces __AP_IP__ placeholder)
+sed "s/__AP_IP__/$AP_IP/g" "$PROJECT_ROOT/config/portal-nginx.conf" \
+    | sudo tee /etc/nginx/sites-available/portal-nginx.conf > /dev/null
 sudo chmod 644 /etc/nginx/sites-available/portal-nginx.conf
+echo "   Portal configured with AP IP: $AP_IP"
 
 # Disable default nginx site
 echo "🗑️  Disabling default nginx site..."
