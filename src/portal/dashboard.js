@@ -4,6 +4,7 @@
  */
 
 let statusData = null;
+let serviceStatus = { active: false, status: 'unknown' };
 
 // Block Registry - Add new blocks here for auto-inclusion
 const BLOCKS = {
@@ -160,8 +161,9 @@ const BLOCKS = {
           ${cam.position ? `<div class="camera-position">${cam.position}</div>` : ''}
           ${cam.online ? `
             ${cam.latest_image ? `
-              <div class="camera-thumbnail">
+              <div class="camera-thumbnail" onclick="openImageModal('${cam.id}', '${cam.id} - ${cam.position || ''}')" title="Click to enlarge">
                 <img src="/api/images/${cam.id}/latest?t=${Date.now()}" alt="${cam.id}" loading="lazy" />
+                <div class="thumbnail-overlay"><span>🔍</span></div>
               </div>
             ` : '<div class="camera-no-image">No images captured yet</div>'}
             <div class="camera-info">
@@ -354,6 +356,61 @@ async function fetchStatus() {
   } catch (error) {
     console.error('Error fetching status:', error);
     return null;
+  }
+}
+
+async function fetchServiceStatus() {
+  try {
+    const response = await fetch('/api/service/status');
+    if (!response.ok) return { active: false, status: 'error' };
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching service status:', error);
+    return { active: false, status: 'error' };
+  }
+}
+
+function updateServiceStatusUI(status) {
+  serviceStatus = status;
+  const indicator = document.getElementById('service-status');
+  if (!indicator) return;
+
+  const dot = indicator.querySelector('.status-dot');
+  const text = indicator.querySelector('.status-text');
+
+  if (status.active) {
+    indicator.className = 'service-status active';
+    text.textContent = status.uptime_seconds ? `Running (${formatUptime(status.uptime_seconds)})` : 'Running';
+  } else {
+    indicator.className = 'service-status stopped';
+    text.textContent = status.status === 'unknown' ? 'Unknown' : 'Stopped';
+  }
+}
+
+async function manualRefresh() {
+  const btn = document.getElementById('refresh-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('refreshing');
+  }
+
+  // Fetch fresh data
+  const [status, svcStatus] = await Promise.all([
+    fetchStatus(),
+    fetchServiceStatus()
+  ]);
+
+  if (status) {
+    // Force full re-render
+    statusData = null;
+    await renderDashboard();
+  }
+
+  updateServiceStatusUI(svcStatus);
+
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove('refreshing');
   }
 }
 
@@ -657,6 +714,67 @@ async function toggleLogLevel() {
   btn.disabled = false;
 }
 
+// Image modal for full-size camera images
+function openImageModal(cameraId, cameraName) {
+  // Create modal if it doesn't exist
+  let modal = document.getElementById('image-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'image-modal';
+    modal.className = 'image-modal';
+    modal.innerHTML = `
+      <div class="modal-backdrop" onclick="closeImageModal()"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <span class="modal-title"></span>
+          <button class="modal-close" onclick="closeImageModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <img src="" alt="Camera image" />
+          <div class="modal-loading">Loading...</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  // Update modal content
+  const img = modal.querySelector('.modal-body img');
+  const title = modal.querySelector('.modal-title');
+  const loading = modal.querySelector('.modal-loading');
+
+  title.textContent = cameraName || cameraId;
+  img.style.display = 'none';
+  loading.style.display = 'block';
+
+  // Load image with cache-busting
+  img.onload = () => {
+    loading.style.display = 'none';
+    img.style.display = 'block';
+  };
+  img.onerror = () => {
+    loading.textContent = 'Failed to load image';
+  };
+  img.src = `/api/images/${cameraId}/latest?t=${Date.now()}`;
+
+  // Show modal
+  modal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeImageModal() {
+  const modal = document.getElementById('image-modal');
+  if (modal) {
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeImageModal();
+});
+
 function showNotification(message, type = 'info') {
   // Create notification element
   const notification = document.createElement('div');
@@ -886,12 +1004,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 1. Initial full render (existing BLOCKS pattern)
   await renderDashboard();
 
-  // 2. Fetch initial log level
-  await fetchLogLevel();
+  // 2. Fetch initial log level and service status
+  await Promise.all([
+    fetchLogLevel(),
+    fetchServiceStatus().then(updateServiceStatusUI)
+  ]);
 
   // 3. Connect SSE for real-time updates (replaces polling)
   connectEventStream();
 
-  // 4. Periodic log level sync (in case changed externally)
+  // 4. Periodic syncs
   setInterval(fetchLogLevel, 30000);
+  setInterval(() => fetchServiceStatus().then(updateServiceStatusUI), 30000);
 });

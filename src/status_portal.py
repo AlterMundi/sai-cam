@@ -673,6 +673,50 @@ def api_health():
     return jsonify(health)
 
 
+@app.route('/api/service/status')
+def api_service_status():
+    """Get sai-cam service status from systemd"""
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'sai-cam'],
+            capture_output=True, text=True, timeout=5
+        )
+        is_active = result.stdout.strip() == 'active'
+
+        # Get more details if active
+        uptime = None
+        if is_active:
+            result2 = subprocess.run(
+                ['systemctl', 'show', 'sai-cam', '--property=ActiveEnterTimestamp'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result2.returncode == 0:
+                # Parse: ActiveEnterTimestamp=Wed 2026-01-14 21:51:30 -03
+                timestamp_str = result2.stdout.strip().split('=', 1)[-1]
+                if timestamp_str:
+                    try:
+                        from datetime import datetime
+                        # Parse the timestamp
+                        start_time = datetime.strptime(timestamp_str.rsplit(' ', 1)[0], '%a %Y-%m-%d %H:%M:%S')
+                        uptime = int((datetime.now() - start_time).total_seconds())
+                    except (ValueError, IndexError):
+                        pass
+
+        return jsonify({
+            'service': 'sai-cam',
+            'active': is_active,
+            'status': result.stdout.strip(),
+            'uptime_seconds': uptime
+        })
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        return jsonify({
+            'service': 'sai-cam',
+            'active': False,
+            'status': 'unknown',
+            'error': str(e)
+        })
+
+
 @app.route('/api/health/cameras')
 def api_health_cameras():
     """Get camera-specific health from direct service state"""

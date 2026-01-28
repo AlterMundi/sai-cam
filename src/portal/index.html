@@ -19,11 +19,17 @@
                     </div>
                 </div>
                 <div class="header-status">
+                    <div id="service-status" class="service-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Checking...</span>
+                    </div>
                     <div id="connection-status" class="connection-status">
                         <span class="status-dot"></span>
                         <span class="status-text">Connecting...</span>
                     </div>
-                    <div id="last-update">Last update: <span id="update-time">--</span></div>
+                    <button id="refresh-btn" class="refresh-btn" onclick="manualRefresh()" title="Refresh now">
+                        <span class="refresh-icon">↻</span>
+                    </button>
                 </div>
             </div>
             <div class="header-info">
