@@ -193,3 +193,4 @@ test_output/
 scripts/*deploy*
 scripts/*prod*
 config/config.yaml
+CLAUDE.md
