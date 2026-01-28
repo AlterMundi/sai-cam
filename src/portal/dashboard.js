@@ -3,7 +3,6 @@
  * Progressive enhancement with feature detection
  */
 
-const REFRESH_INTERVAL = 5000; // 5 seconds
 let statusData = null;
 
 // Block Registry - Add new blocks here for auto-inclusion
@@ -162,7 +161,7 @@ const BLOCKS = {
           ${cam.online ? `
             ${cam.latest_image ? `
               <div class="camera-thumbnail">
-                <img src="/api/images/${cam.id}/latest" alt="${cam.id}" />
+                <img src="/api/images/${cam.id}/latest?t=${Date.now()}" alt="${cam.id}" loading="lazy" />
               </div>
             ` : '<div class="camera-no-image">No images captured yet</div>'}
             <div class="camera-info">
@@ -331,7 +330,19 @@ function formatUptime(seconds) {
 function createBlock(blockConfig, data) {
   const blockEl = document.createElement('div');
   blockEl.className = 'block-wrapper';
-  blockEl.innerHTML = blockConfig.render.call(blockConfig, data);
+  try {
+    blockEl.innerHTML = blockConfig.render.call(blockConfig, data);
+  } catch (error) {
+    console.error(`Error rendering block ${blockConfig.title}:`, error);
+    blockEl.innerHTML = `
+      <div class="block">
+        <h3><span class="icon">⚠️</span> ${blockConfig.title}</h3>
+        <div class="error-message">
+          <p>Failed to render this block</p>
+        </div>
+      </div>
+    `;
+  }
   return blockEl;
 }
 
@@ -387,16 +398,24 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-async function renderDashboard() {
+async function renderDashboard(forceFullRender = false) {
   const status = await fetchStatus();
   if (!status) {
-    document.getElementById('loading').innerHTML = `
-      <div class="error-message">
-        <h3>Failed to load status</h3>
-        <p>Retrying in ${REFRESH_INTERVAL / 1000} seconds...</p>
-      </div>
-    `;
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) {
+      loadingEl.innerHTML = `
+        <div class="error-message">
+          <h3>Failed to load status</h3>
+          <p>Retrying in 5 seconds...</p>
+        </div>
+      `;
+    }
     return;
+  }
+
+  // Force full render if requested (e.g., after WiFi toggle)
+  if (forceFullRender) {
+    statusData = null;
   }
 
   // Update header
@@ -427,28 +446,32 @@ async function renderDashboard() {
   const loading = document.getElementById('loading');
   if (loading) loading.remove();
 
-  // On refresh, preserve log content to avoid flashing
-  const existingLogContent = document.getElementById('log-viewer')?.innerHTML;
+  // Only do full re-render on initial load or forced refresh
+  // SSE handles incremental updates after that
+  const isInitialLoad = statusData === null;
 
-  // Clear existing blocks if this is a refresh
-  if (statusData !== null) {
+  if (isInitialLoad) {
+    // Preserve log content to avoid flash on force refresh
+    const existingLogContent = document.getElementById('log-viewer')?.innerHTML;
+
+    // Clear container for fresh render
     container.innerHTML = '';
-  }
 
-  // Sort blocks by order
-  const sortedBlocks = Object.entries(BLOCKS).sort((a, b) => a[1].order - b[1].order);
+    // Sort blocks by order
+    const sortedBlocks = Object.entries(BLOCKS).sort((a, b) => a[1].order - b[1].order);
 
-  sortedBlocks.forEach(([key, blockConfig]) => {
-    if (blockConfig.detector(status)) {
-      const blockEl = createBlock(blockConfig, status.data);
-      container.appendChild(blockEl);
+    sortedBlocks.forEach(([key, blockConfig]) => {
+      if (blockConfig.detector(status)) {
+        const blockEl = createBlock(blockConfig, status.data);
+        container.appendChild(blockEl);
+      }
+    });
+
+    // Restore log content if we had any
+    if (existingLogContent && existingLogContent !== '<div class="log-loading">Loading logs...</div>') {
+      const logViewer = document.getElementById('log-viewer');
+      if (logViewer) logViewer.innerHTML = existingLogContent;
     }
-  });
-
-  // Restore log content immediately to prevent flash
-  if (existingLogContent) {
-    const logViewer = document.getElementById('log-viewer');
-    if (logViewer) logViewer.innerHTML = existingLogContent;
   }
 
   // Update log level button to show current state
@@ -485,9 +508,9 @@ async function enableWifiAP() {
       // Show success message
       showNotification('WiFi AP enabled successfully', 'success');
 
-      // Refresh dashboard after short delay
+      // Refresh dashboard after short delay (force full render for WiFi block update)
       setTimeout(() => {
-        renderDashboard();
+        renderDashboard(true);
       }, 2000);
     } else {
       // Show error message
@@ -538,9 +561,9 @@ async function disableWifiAP() {
       // Show success message
       showNotification('WiFi AP disabled successfully', 'success');
 
-      // Refresh dashboard after short delay
+      // Refresh dashboard after short delay (force full render for WiFi block update)
       setTimeout(() => {
-        renderDashboard();
+        renderDashboard(true);
       }, 2000);
     } else {
       // Show error message
@@ -866,11 +889,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 2. Fetch initial log level
   await fetchLogLevel();
 
-  // 3. Connect SSE for real-time updates
+  // 3. Connect SSE for real-time updates (replaces polling)
   connectEventStream();
 
-  // 4. Keep polling as fallback for now (will be removed after SSE is verified)
-  // TODO: Remove after SSE is stable
-  setInterval(renderDashboard, REFRESH_INTERVAL);
+  // 4. Periodic log level sync (in case changed externally)
   setInterval(fetchLogLevel, 30000);
 });

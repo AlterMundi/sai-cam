@@ -4,18 +4,23 @@ SAI-Cam Status Portal
 Lightweight Flask API providing node health and status information
 """
 
-import os
-import sys
+import copy
 import json
-import yaml
-import psutil
+import logging
+import os
+import re
+import signal
+import socket
 import subprocess
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, jsonify, send_from_directory, Response, request, stream_with_context
 from threading import Thread
-import time
-import logging
+
+import psutil
+import yaml
+from flask import Flask, jsonify, send_from_directory, Response, request, stream_with_context
 
 # Add parent directory to path for imports
 current_dir = os.path.dirname(__file__)
@@ -23,7 +28,11 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-VERSION = "0.1.0"
+# Import version from camera_service to keep in sync
+try:
+    from camera_service import VERSION
+except ImportError:
+    VERSION = "0.2.3"  # Fallback if import fails
 
 app = Flask(__name__, static_folder='portal', static_url_path='')
 
@@ -53,6 +62,9 @@ def setup_logging():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+    # Initialize CPU percent measurement (first call returns 0, primes the counter)
+    psutil.cpu_percent(interval=None)
+
 def detect_features():
     """Auto-detect available features on this node"""
     features = {
@@ -72,7 +84,7 @@ def is_wifi_ap_active():
         result = subprocess.run(['iw', 'dev', 'wlan0', 'info'],
                               capture_output=True, text=True, timeout=2)
         return 'type AP' in result.stdout
-    except:
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return False
 
 def get_wifi_ap_info():
@@ -89,7 +101,7 @@ def get_wifi_ap_info():
             result = subprocess.run(['iw', 'dev', 'wlan0', 'station', 'dump'],
                                   capture_output=True, text=True, timeout=2)
             client_count = result.stdout.count('Station ')
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             client_count = 0
 
         # Get channel
@@ -102,7 +114,7 @@ def get_wifi_ap_info():
                     break
             else:
                 channel = 'N/A'
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             channel = 'N/A'
 
         return {
@@ -118,7 +130,9 @@ def get_wifi_ap_info():
 def get_system_info():
     """Get system resource information"""
     try:
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # Use non-blocking cpu_percent (returns value since last call)
+        # First call returns 0.0, subsequent calls return meaningful values
+        cpu_percent = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
 
@@ -128,7 +142,7 @@ def get_system_info():
             if os.path.exists('/sys/class/thermal/thermal_zone0/temp'):
                 with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
                     temperature = int(f.read().strip()) / 1000.0
-        except:
+        except (IOError, ValueError, OSError):
             pass
 
         return {
@@ -271,7 +285,7 @@ def get_network_info():
             result = subprocess.run(['ping', '-c', '1', '-W', '2', '8.8.8.8'],
                                   capture_output=True, timeout=3)
             upstream_online = result.returncode == 0
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
 
         # Detect WAN interface from default route (actual internet connection)
@@ -284,7 +298,7 @@ def get_network_info():
                 parts = result.stdout.split()
                 if 'dev' in parts:
                     wan_interface = parts[parts.index('dev') + 1]
-        except:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
             pass
 
         # Fallback to config if route detection fails
@@ -308,17 +322,46 @@ def get_network_info():
         return {}
 
 def get_recent_logs(lines=50):
-    """Get recent log entries"""
+    """Get recent log entries using efficient tail-like reading"""
     log_path = Path('/var/log/sai-cam/camera_service.log')
     if not log_path.exists():
         return []
 
     try:
-        with open(log_path, 'r') as f:
-            all_lines = f.readlines()
-            recent = all_lines[-lines:] if len(all_lines) > lines else all_lines
-            return [line.strip() for line in recent]
-    except Exception as e:
+        # Efficient tail: read from end of file
+        with open(log_path, 'rb') as f:
+            # Seek to end
+            f.seek(0, 2)
+            file_size = f.tell()
+
+            if file_size == 0:
+                return []
+
+            # Read chunks from end until we have enough lines
+            chunk_size = 8192
+            found_lines = []
+            position = file_size
+
+            while position > 0 and len(found_lines) < lines + 1:
+                read_size = min(chunk_size, position)
+                position -= read_size
+                f.seek(position)
+                chunk = f.read(read_size).decode('utf-8', errors='replace')
+
+                # Split and prepend to found lines
+                chunk_lines = chunk.split('\n')
+                if found_lines:
+                    # Merge partial line from previous chunk
+                    chunk_lines[-1] += found_lines[0]
+                    found_lines = chunk_lines + found_lines[1:]
+                else:
+                    found_lines = chunk_lines
+
+            # Return last N non-empty lines
+            result = [line.strip() for line in found_lines if line.strip()]
+            return result[-lines:]
+
+    except (IOError, OSError, UnicodeDecodeError) as e:
         logger.error(f"Error reading logs: {e}")
         return []
 
@@ -372,7 +415,12 @@ def api_network():
 @app.route('/api/logs')
 def api_logs():
     """Get recent log entries"""
-    lines = int(request.args.get('lines', 50))
+    try:
+        lines = int(request.args.get('lines', 50))
+        # Bounds check to prevent memory exhaustion
+        lines = max(1, min(lines, 1000))
+    except (ValueError, TypeError):
+        lines = 50
     return jsonify({'logs': get_recent_logs(lines)})
 
 @app.route('/api/logs/stream')
@@ -510,13 +558,16 @@ def api_latest_image(camera_id):
 @app.route('/api/config')
 def api_config():
     """Get sanitized configuration"""
-    sanitized = config.copy()
+    sanitized = copy.deepcopy(config)
 
     # Remove sensitive information
     if 'cameras' in sanitized:
         for cam in sanitized['cameras']:
             if 'password' in cam:
                 cam['password'] = '***'
+            # Also redact passwords in RTSP URLs
+            if 'rtsp_url' in cam:
+                cam['rtsp_url'] = re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', cam['rtsp_url'])
 
     if 'server' in sanitized:
         if 'auth_token' in sanitized['server']:
@@ -583,7 +634,6 @@ def api_wifi_disable():
 
 def query_health_socket():
     """Query camera service health via Unix domain socket"""
-    import socket
     socket_path = '/run/sai-cam/health.sock'
 
     if not os.path.exists(socket_path):
@@ -682,8 +732,6 @@ def api_get_log_level():
 @app.route('/api/log_level', methods=['POST'])
 def api_set_log_level():
     """Set log level and send SIGHUP to camera service"""
-    import signal
-
     data = request.get_json() or {}
     new_level = data.get('level', '').upper()
 
@@ -701,7 +749,6 @@ def api_set_log_level():
             config_content = f.read()
 
         # Replace log level using sed-like pattern
-        import re
         new_content = re.sub(
             r"(logging:\s*\n\s*level:\s*)['\"]?\w+['\"]?",
             f"\\1'{new_level}'",
