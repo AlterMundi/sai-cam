@@ -1,7 +1,8 @@
 [Unit]
 Description=SAI Camera Service
 After=network.target
-StartLimitIntervalSec=0
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=notify

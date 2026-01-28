@@ -35,7 +35,7 @@ for _path in [_current_dir, _parent_dir]:
 # Import logging utilities
 from logging_utils import RateLimitedLogger, CameraStateTracker
 
-VERSION = "0.2.1"  # Added camera retry on init failure
+VERSION = "0.2.2"  # Added credential redaction and systemd restart limiting
 
 # Force FFMPEG to use TCP transport for all RTSP connections
 # Default: H.264 for broad compatibility (EZViz cameras, Raspberry Pi 3B)

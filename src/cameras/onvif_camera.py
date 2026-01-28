@@ -18,6 +18,10 @@ except ImportError:
     ONVIFCamera = None
 
 from .base_camera import BaseCamera
+try:
+    from ..logging_utils import redact_url_credentials
+except ImportError:
+    from logging_utils import redact_url_credentials
 
 
 class ONVIFCameraImpl(BaseCamera):
@@ -187,7 +191,7 @@ class ONVIFCameraImpl(BaseCamera):
             snapshot_uri_response = self.media_service.GetSnapshotUri({'ProfileToken': profile.token})
             self.snapshot_uri = snapshot_uri_response.Uri
             self.logger.info(f"Camera {self.camera_id}: ONVIF snapshot URI obtained")
-            self.logger.debug(f"Camera {self.camera_id}: Snapshot URI: {self.snapshot_uri}")
+            self.logger.debug(f"Camera {self.camera_id}: Snapshot URI: {redact_url_credentials(self.snapshot_uri)}")
             
             self.is_connected = True
             self.reset_reconnect_attempts()

@@ -5,10 +5,32 @@ Provides rate-limited logging and other logging utilities to prevent
 log spam from repeated errors (e.g., offline cameras).
 """
 
+import re
 import time
 import logging
 from typing import Optional, Dict, Any
 from threading import Lock, RLock
+
+
+def redact_url_credentials(url: str) -> str:
+    """Redact passwords from URLs for safe logging.
+
+    Examples:
+        rtsp://admin:secret@192.168.1.10:554/stream
+        -> rtsp://admin:***@192.168.1.10:554/stream
+
+        http://user:password123@example.com/path
+        -> http://user:***@example.com/path
+
+    Args:
+        url: URL string that may contain credentials
+
+    Returns:
+        URL with password redacted, or original string if no credentials found
+    """
+    if not url:
+        return url
+    return re.sub(r'(://[^:]+:)[^@]+(@)', r'\1***\2', url)
 
 
 class RateLimitedLogger:

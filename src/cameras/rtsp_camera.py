@@ -12,6 +12,10 @@ import cv2
 from threading import Lock
 
 from .base_camera import BaseCamera
+try:
+    from ..logging_utils import redact_url_credentials
+except ImportError:
+    from logging_utils import redact_url_credentials
 
 
 class RTSPCamera(BaseCamera):
@@ -39,7 +43,7 @@ class RTSPCamera(BaseCamera):
     def setup(self) -> bool:
         """Initialize RTSP camera connection"""
         try:
-            self.logger.info(f"Camera {self.camera_id}: Initializing RTSP with URL: {self.rtsp_url}")
+            self.logger.info(f"Camera {self.camera_id}: Initializing RTSP with URL: {redact_url_credentials(self.rtsp_url)}")
             
             with self.lock:
                 # Initialize the capture with FFMPEG backend
