@@ -1154,6 +1154,13 @@ footer p {
   animation: spin 0.8s linear infinite;
 }
 
+/* Update time */
+.update-time {
+  font-size: 0.7em;
+  color: var(--sai-text-muted);
+  font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+}
+
 /* Connection Status Indicator - Pill style */
 
 .connection-status {
