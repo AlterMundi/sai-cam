@@ -203,11 +203,14 @@ def get_camera_status():
             else:
                 last_capture = f'{int(age/3600)}h ago'
 
-        # Get storage location for thumbnails
+        # Get storage location for thumbnails (check both pending and uploaded)
         latest_image = None
         storage_path = Path('/opt/sai-cam/storage')
         if storage_path.exists():
             cam_images = list(storage_path.glob(f'{cam_id}_*.jpg'))
+            uploaded_path = storage_path / 'uploaded'
+            if uploaded_path.exists():
+                cam_images.extend(uploaded_path.glob(f'{cam_id}_*.jpg'))
             if cam_images:
                 latest = max(cam_images, key=lambda p: p.stat().st_mtime)
                 latest_image = latest.name
@@ -548,13 +551,16 @@ def api_latest_image(camera_id):
     if not storage_path.exists():
         return jsonify({'error': 'Storage not found'}), 404
 
-    # Find latest image for this camera
+    # Find latest image for this camera (check both pending and uploaded)
     cam_images = list(storage_path.glob(f'{camera_id}_*.jpg'))
+    uploaded_path = storage_path / 'uploaded'
+    if uploaded_path.exists():
+        cam_images.extend(uploaded_path.glob(f'{camera_id}_*.jpg'))
     if not cam_images:
         return jsonify({'error': 'No images found'}), 404
 
     latest = max(cam_images, key=lambda p: p.stat().st_mtime)
-    return send_from_directory(storage_path, latest.name)
+    return send_from_directory(latest.parent, latest.name)
 
 @app.route('/api/config')
 def api_config():
