@@ -1,30 +1,58 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
   "links": [
-    { "title": "Fleet Overview", "url": "/d/saicam-fleet-overview", "type": "link" }
+    {
+      "title": "Fleet Overview",
+      "url": "/d/saicam-fleet-overview",
+      "type": "link"
+    }
   ],
   "panels": [
     {
       "title": "CPU",
       "type": "gauge",
-      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_cpu_percent{node_id=\"$node_id\"}", "legendFormat": "" }
+        {
+          "expr": "saicam_cpu_percent{node_id=\"$node_id\"}",
+          "legendFormat": ""
+        }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent", "min": 0, "max": 100,
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 60 },
-              { "color": "red", "value": 85 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
             ]
           }
         }
@@ -33,20 +61,42 @@
     {
       "title": "Memory",
       "type": "gauge",
-      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_memory_percent{node_id=\"$node_id\"}", "legendFormat": "" }
+        {
+          "expr": "saicam_memory_percent{node_id=\"$node_id\"}",
+          "legendFormat": ""
+        }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent", "min": 0, "max": 100,
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "red", "value": 85 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
             ]
           }
         }
@@ -55,20 +105,42 @@
     {
       "title": "Disk",
       "type": "gauge",
-      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_disk_percent{node_id=\"$node_id\"}", "legendFormat": "" }
+        {
+          "expr": "saicam_disk_percent{node_id=\"$node_id\"}",
+          "legendFormat": ""
+        }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent", "min": 0, "max": 100,
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 70 },
-              { "color": "red", "value": 90 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
             ]
           }
         }
@@ -77,10 +149,21 @@
     {
       "title": "Temperature",
       "type": "stat",
-      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_temperature_celsius{node_id=\"$node_id\"}", "legendFormat": "" }
+        {
+          "expr": "saicam_temperature_celsius{node_id=\"$node_id\"}",
+          "legendFormat": ""
+        }
       ],
       "fieldConfig": {
         "defaults": {
@@ -88,32 +171,62 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 60 },
-              { "color": "red", "value": 75 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 75
+              }
             ]
           },
-          "color": { "mode": "thresholds" }
+          "color": {
+            "mode": "thresholds"
+          }
         }
       }
     },
     {
       "title": "Service Uptime",
       "type": "stat",
-      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_service_uptime_seconds{node_id=\"$node_id\"}", "legendFormat": "" }
+        {
+          "expr": "saicam_service_uptime_seconds{node_id=\"$node_id\"}",
+          "legendFormat": ""
+        }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "yellow", "value": null },
-              { "color": "green", "value": 300 }
+              {
+                "color": "yellow",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 300
+              }
             ]
           }
         }
@@ -122,22 +235,53 @@
     {
       "title": "Upstream",
       "type": "stat",
-      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_upstream_online{node_id=\"$node_id\"}", "legendFormat": "" }
+        {
+          "expr": "saicam_upstream_online{node_id=\"$node_id\"}",
+          "legendFormat": ""
+        }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "Offline", "color": "red" }, "1": { "text": "Online", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Offline",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "Online",
+                  "color": "green"
+                }
+              }
+            }
           ],
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         }
@@ -146,27 +290,64 @@
     {
       "title": "System Resources Over Time",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_cpu_percent{node_id=\"$node_id\"}", "legendFormat": "CPU %" },
-        { "expr": "saicam_memory_percent{node_id=\"$node_id\"}", "legendFormat": "Memory %" },
-        { "expr": "saicam_disk_percent{node_id=\"$node_id\"}", "legendFormat": "Disk %" }
+        {
+          "expr": "saicam_cpu_percent{node_id=\"$node_id\"}",
+          "legendFormat": "CPU %"
+        },
+        {
+          "expr": "saicam_memory_percent{node_id=\"$node_id\"}",
+          "legendFormat": "Memory %"
+        },
+        {
+          "expr": "saicam_disk_percent{node_id=\"$node_id\"}",
+          "legendFormat": "Disk %"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
     },
     {
       "title": "Temperature Over Time",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_temperature_celsius{node_id=\"$node_id\"}", "legendFormat": "Temperature" }
+        {
+          "expr": "saicam_temperature_celsius{node_id=\"$node_id\"}",
+          "legendFormat": "Temperature"
+        }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
-          "color": { "fixedColor": "orange", "mode": "fixed" }
+          "color": {
+            "fixedColor": "orange",
+            "mode": "fixed"
+          }
         }
       }
     },
@@ -174,143 +355,297 @@
       "title": "Camera State",
       "description": "0=healthy, 1=failing, 2=offline",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_camera_state{node_id=\"$node_id\"}", "legendFormat": "{{camera_id}}" }
+        {
+          "expr": "saicam_camera_state{node_id=\"$node_id\"}",
+          "legendFormat": "{{camera_id}}"
+        }
       ],
       "fieldConfig": {
         "defaults": {
-          "min": 0, "max": 2, "decimals": 0,
+          "min": 0,
+          "max": 2,
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 2 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
             ]
           },
-          "color": { "mode": "thresholds" },
-          "custom": { "fillOpacity": 20 }
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "fillOpacity": 20
+          }
         }
       }
     },
     {
       "title": "Camera Consecutive Failures",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_camera_consecutive_failures{node_id=\"$node_id\"}", "legendFormat": "{{camera_id}}" }
+        {
+          "expr": "saicam_camera_consecutive_failures{node_id=\"$node_id\"}",
+          "legendFormat": "{{camera_id}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "min": 0 } }
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        }
+      }
     },
     {
       "title": "Camera Backoff Multiplier",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_camera_backoff_multiplier{node_id=\"$node_id\"}", "legendFormat": "{{camera_id}}" }
+        {
+          "expr": "saicam_camera_backoff_multiplier{node_id=\"$node_id\"}",
+          "legendFormat": "{{camera_id}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "min": 0 } }
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        }
+      }
     },
     {
       "title": "Camera Thread Alive",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_camera_thread_alive{node_id=\"$node_id\"}", "legendFormat": "{{camera_id}}" }
+        {
+          "expr": "saicam_camera_thread_alive{node_id=\"$node_id\"}",
+          "legendFormat": "{{camera_id}}"
+        }
       ],
       "fieldConfig": {
         "defaults": {
-          "min": 0, "max": 1,
+          "min": 0,
+          "max": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           },
-          "color": { "mode": "thresholds" },
-          "custom": { "fillOpacity": 20 }
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "fillOpacity": 20
+          }
         }
       }
     },
     {
       "title": "Storage: Total Images",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_storage_total_images{node_id=\"$node_id\"}", "legendFormat": "Total" }
+        {
+          "expr": "saicam_storage_total_images{node_id=\"$node_id\"}",
+          "legendFormat": "Total"
+        }
       ]
     },
     {
       "title": "Storage: Pending Upload",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_storage_pending_images{node_id=\"$node_id\"}", "legendFormat": "Pending" }
+        {
+          "expr": "saicam_storage_pending_images{node_id=\"$node_id\"}",
+          "legendFormat": "Pending"
+        }
       ],
       "fieldConfig": {
         "defaults": {
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 200 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 200
+              }
             ]
           },
-          "color": { "mode": "thresholds" }
+          "color": {
+            "mode": "thresholds"
+          }
         }
       }
     },
     {
       "title": "Storage: Size (MB)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_storage_size_mb{node_id=\"$node_id\"}", "legendFormat": "Size MB" }
+        {
+          "expr": "saicam_storage_size_mb{node_id=\"$node_id\"}",
+          "legendFormat": "Size MB"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "decmbytes" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes"
+        }
+      }
     },
     {
       "title": "Upstream Connectivity",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 37 },
-      "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
       "targets": [
-        { "expr": "saicam_upstream_online{node_id=\"$node_id\"}", "legendFormat": "Upstream" }
+        {
+          "expr": "saicam_upstream_online{node_id=\"$node_id\"}",
+          "legendFormat": "Upstream"
+        }
       ],
       "fieldConfig": {
         "defaults": {
-          "min": 0, "max": 1,
+          "min": 0,
+          "max": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           },
-          "color": { "mode": "thresholds" },
-          "custom": { "fillOpacity": 30 }
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "fillOpacity": 30
+          }
         }
       }
     }
   ],
   "schemaVersion": 39,
-  "tags": ["saicam", "node"],
+  "tags": [
+    "saicam",
+    "node"
+  ],
   "templating": {
     "list": [
       {
         "name": "node_id",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "${DS_VICTORIAMETRICS}" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": ""
+        },
         "query": "label_values(saicam_cpu_percent, node_id)",
         "refresh": 2,
         "sort": 1,
@@ -318,7 +653,10 @@
       }
     ]
   },
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "SAI-Cam Node Detail",

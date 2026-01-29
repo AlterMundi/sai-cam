@@ -6,10 +6,12 @@ services:
       - "${VM_PORT:-8428}:8428"
     volumes:
       - vm-data:/storage
+      - ./vmconfig:/etc/vmconfig:ro
     command:
       - '-storageDataPath=/storage'
       - '-retentionPeriod=6'
       - '-httpListenAddr=:8428'
+      - '-promscrape.config=/etc/vmconfig/scrape.yml'
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8428/health"]
