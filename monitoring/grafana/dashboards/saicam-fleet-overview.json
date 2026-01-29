@@ -150,6 +150,8 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
+          "min": 0,
+          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -195,6 +197,8 @@
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
+          "min": 0,
+          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -270,13 +274,119 @@
       }
     },
     {
+      "title": "CPU Usage per Node",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "saicam_cpu_percent",
+          "legendFormat": "{{node_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
+    },
+    {
+      "title": "Memory Usage per Node",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "saicam_memory_percent",
+          "legendFormat": "{{node_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
+    },
+    {
+      "title": "Disk Usage per Node",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "saicam_disk_percent",
+          "legendFormat": "{{node_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
+    },
+    {
+      "title": "Temperature per Node",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "saicam_temperature_celsius",
+          "legendFormat": "{{node_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius"
+        }
+      }
+    },
+    {
       "title": "Nodes Overview",
       "type": "table",
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 4
+        "y": 20
       },
       "datasource": {
         "type": "prometheus",
@@ -332,115 +442,9 @@
           "options": {}
         }
       ]
-    },
-    {
-      "title": "CPU Usage per Node",
-      "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 12
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": ""
-      },
-      "targets": [
-        {
-          "expr": "saicam_cpu_percent",
-          "legendFormat": "{{node_id}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        }
-      }
-    },
-    {
-      "title": "Memory Usage per Node",
-      "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 12
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": ""
-      },
-      "targets": [
-        {
-          "expr": "saicam_memory_percent",
-          "legendFormat": "{{node_id}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        }
-      }
-    },
-    {
-      "title": "Disk Usage per Node",
-      "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 20
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": ""
-      },
-      "targets": [
-        {
-          "expr": "saicam_disk_percent",
-          "legendFormat": "{{node_id}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        }
-      }
-    },
-    {
-      "title": "Temperature per Node",
-      "type": "timeseries",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 20
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": ""
-      },
-      "targets": [
-        {
-          "expr": "saicam_temperature_celsius",
-          "legendFormat": "{{node_id}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "celsius"
-        }
-      }
     }
   ],
-  "schemaVersion": 39,
+  "schemaVersion": 40,
   "tags": [
     "saicam",
     "fleet"
