@@ -18,6 +18,6 @@ systemd-python>=235  # For systemd watchdog support
 flask>=3.0.0         # For web status portal
 
 # Development and testing (optional)
-# pytest>=7.0.0      # For unit testing
+pytest>=7.0.0        # For unit testing
 # black>=22.0.0      # For code formatting
 
