@@ -101,7 +101,12 @@ class RTSPCamera(BaseCamera):
             return False
     
     def capture_frame(self) -> Optional[np.ndarray]:
-        """Capture frame from RTSP stream"""
+        """Capture frame from RTSP stream.
+
+        If the initial read() fails (common with long capture intervals where
+        the HEVC decoder accumulates errors), automatically reconnects once
+        and retries before returning None.
+        """
         if not self.is_connected:
             return None
 
@@ -114,10 +119,22 @@ class RTSPCamera(BaseCamera):
 
                 ret, frame = self.cap.read()
 
-                if not ret or frame is None:
-                    self.logger.warning(f"Camera {self.camera_id}: Frame read failed (stream may have dropped)")
-                    return None
+                if ret and frame is not None:
+                    return frame
 
+            # read() failed — stream likely went stale between captures.
+            # Reconnect once and retry rather than entering backoff.
+            self.logger.info(f"Camera {self.camera_id}: Frame read failed, reconnecting for fresh stream")
+            self.cleanup()
+            if not self.setup():
+                self.logger.warning(f"Camera {self.camera_id}: Reconnect failed during capture retry")
+                return None
+
+            with self.lock:
+                ret, frame = self.cap.read()
+                if not ret or frame is None:
+                    self.logger.warning(f"Camera {self.camera_id}: Frame read failed after reconnect")
+                    return None
                 return frame
 
         except Exception as e:
