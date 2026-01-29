@@ -248,7 +248,8 @@ def get_storage_info():
             'pending_images': len(images) - len(uploaded_images),
             'total_size_mb': round(total_size, 2),
             'uploaded_size_mb': round(uploaded_size, 2),
-            'max_size_gb': config.get('storage', {}).get('max_size_gb', 0)
+            'max_size_gb': config.get('storage', {}).get('max_size_gb', 0),
+            'cleanup_threshold_gb': config.get('storage', {}).get('cleanup_threshold_gb', 0)
         }
     except Exception as e:
         logger.error(f"Error getting storage info: {e}")

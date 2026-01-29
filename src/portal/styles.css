@@ -735,6 +735,14 @@ main {
   border-radius: 5px;
 }
 
+.storage-bar.warning .storage-bar-fill {
+  background: linear-gradient(90deg, var(--sai-orange) 0%, #e65100 100%);
+}
+
+.storage-bar.critical .storage-bar-fill {
+  background: linear-gradient(90deg, #e65100 0%, var(--error-color) 100%);
+}
+
 .storage-bar-label {
   position: absolute;
   top: 50%;

@@ -213,9 +213,11 @@ const BLOCKS = {
     detector: (status) => status.features.storage && status.data.storage !== null,
     render: function(data) {
       const storage = data.storage;
-      const pendingPercent = storage.total_images > 0
-        ? Math.round((storage.pending_images / storage.total_images) * 100)
+      const thresholdMb = (storage.cleanup_threshold_gb || storage.max_size_gb || 1) * 1024;
+      const usedPercent = thresholdMb > 0
+        ? Math.min(100, Math.round((storage.total_size_mb / thresholdMb) * 100))
         : 0;
+      const barClass = usedPercent > 90 ? 'critical' : usedPercent > 70 ? 'warning' : '';
 
       return `
         <div class="block">
@@ -230,17 +232,13 @@ const BLOCKS = {
               <div class="metric-value success">${storage.uploaded_images}</div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">Pending Upload</div>
-              <div class="metric-value ${storage.pending_images > 10 ? 'warning' : ''}">${storage.pending_images}</div>
-            </div>
-            <div class="metric-item">
               <div class="metric-label">Storage Used</div>
               <div class="metric-value">${storage.total_size_mb}MB</div>
             </div>
           </div>
-          <div class="storage-bar">
-            <div class="storage-bar-fill" style="width: ${pendingPercent}%"></div>
-            <div class="storage-bar-label">${pendingPercent}% pending upload</div>
+          <div class="storage-bar ${barClass}">
+            <div class="storage-bar-fill" style="width: ${usedPercent}%"></div>
+            <div class="storage-bar-label">${storage.total_size_mb}MB / ${thresholdMb >= 1024 ? ((thresholdMb/1024).toFixed(1) + 'GB') : (thresholdMb + 'MB')} (${usedPercent}%)</div>
           </div>
         </div>
       `;
