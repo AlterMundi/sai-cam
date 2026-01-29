@@ -263,15 +263,16 @@ const BLOCKS = {
       });
 
       const interfaces = sortedInterfaces.map(([name, iface]) => {
-        const isWan = name === network.wan_interface;
+        const isVpn = name.startsWith('zt');
+        const typeLabel = isVpn ? 'VPN (ZeroTier)' : iface.type;
+        const ips = (iface.ips || [iface.ip]).join(', ');
         return `
-          <div class="network-interface ${isWan ? 'wan' : ''}">
-            <div class="interface-header">
+          <div class="network-interface">
+            <div class="interface-row">
               <span class="interface-name">${name}</span>
-              ${isWan ? '<span class="interface-badge wan">WAN</span>' : ''}
+              <span class="interface-ip">${ips}</span>
             </div>
-            <div class="interface-ip">${(iface.ips || [iface.ip]).join('</div><div class="interface-ip">')}</div>
-            <div class="interface-type">${iface.type}</div>
+            <div class="interface-type">${typeLabel}</div>
           </div>
         `;
       }).join('');
@@ -283,14 +284,11 @@ const BLOCKS = {
             <span class="mode-icon">${modeIcon}</span>
             <span class="mode-label">Mode: ${modeLabel}</span>
           </div>
-          <div class="network-status">
-            <div class="metric-item">
-              <div class="metric-label">Internet Connection</div>
-              <div class="metric-value">
-                <span class="badge ${network.upstream_online ? 'online' : 'offline'}">
-                  ${network.upstream_online ? '● Online' : '○ Offline'}
-                </span>
-              </div>
+          <div class="network-internet-row">
+            <span class="metric-label">Internet Connection</span>
+            <div class="network-internet-pill ${network.upstream_online ? 'online' : 'offline'}">
+              <span class="status-dot"></span>
+              <span>${network.upstream_online ? 'Online' : 'Offline'}</span>
             </div>
           </div>
           <div class="network-interfaces">
@@ -386,18 +384,23 @@ async function fetchServiceStatus() {
 
 function updateServiceStatusUI(status) {
   serviceStatus = status;
-  const indicator = document.getElementById('service-status');
-  if (!indicator) return;
+  updateNodeStatus();
+}
 
-  const dot = indicator.querySelector('.status-dot');
-  const text = indicator.querySelector('.status-text');
+function updateNodeStatus() {
+  const el = document.getElementById('node-status');
+  if (!el) return;
+  const text = el.querySelector('.status-text');
 
-  if (status.active) {
-    indicator.className = 'service-status active';
-    text.textContent = status.uptime_seconds ? `Running (${formatUptime(status.uptime_seconds)})` : 'Running';
+  if (!serviceStatus.active && serviceStatus.status !== 'unknown') {
+    el.className = 'node-status warning';
+    text.textContent = 'Service stopped';
+  } else if (serviceStatus.active) {
+    el.className = 'node-status live';
+    text.textContent = 'Live';
   } else {
-    indicator.className = 'service-status stopped';
-    text.textContent = status.status === 'unknown' ? 'Unknown' : 'Stopped';
+    el.className = 'node-status';
+    text.textContent = 'Connecting...';
   }
 }
 
@@ -490,8 +493,8 @@ async function renderDashboard(forceFullRender = false) {
   }
 
   // Update header
-  document.getElementById('node-id').innerHTML = `<strong>Node:</strong> ${status.node.id}`;
-  document.getElementById('node-location').textContent = status.node.location;
+  document.getElementById('node-id').textContent = status.node.id;
+  document.getElementById('node-location').textContent = `📍 ${status.node.location}`;
   document.getElementById('version').textContent = status.node.version;
   document.getElementById('update-time').textContent = new Date().toLocaleTimeString();
 
@@ -501,15 +504,6 @@ async function renderDashboard(forceFullRender = false) {
     const mode = network.mode || 'ethernet';
     const modeIcon = mode === 'wifi-client' ? '📶' : '🔌';
 
-    // Use WAN interface from config
-    const wanName = network.wan_interface || 'eth0';
-    const wanIface = network.interfaces?.[wanName];
-    const wanInfo = wanIface ? `${modeIcon} ${wanName}: ${wanIface.ip}` : `${modeIcon} ${wanName}: --`;
-    const internetStatus = network.upstream_online ? '● Online' : '○ Offline';
-
-    document.getElementById('wan-interface').textContent = wanInfo;
-    document.getElementById('internet-status').textContent = internetStatus;
-    document.getElementById('internet-status').className = network.upstream_online ? 'status-online' : 'status-offline';
   }
 
   // Render blocks
@@ -957,15 +951,13 @@ function connectEventStream() {
 }
 
 function updateConnectionStatus(connected) {
-  const statusEl = document.getElementById('connection-status');
-  if (!statusEl) return;
-
-  if (connected) {
-    statusEl.className = 'connection-status connected';
-    statusEl.querySelector('.status-text').textContent = 'Live';
+  if (!connected) {
+    const el = document.getElementById('node-status');
+    if (!el) return;
+    el.className = 'node-status disconnected';
+    el.querySelector('.status-text').textContent = 'Reconnecting...';
   } else {
-    statusEl.className = 'connection-status disconnected';
-    statusEl.querySelector('.status-text').textContent = 'Reconnecting...';
+    updateNodeStatus();
   }
 }
 

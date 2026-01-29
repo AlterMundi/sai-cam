@@ -80,22 +80,25 @@ header {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+  position: relative;
+  min-height: 40px;
 }
 
-.logo-section {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.title-section {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
 }
 
 .logo {
-  height: 36px;
+  height: 42px;
   width: auto;
 }
 
 .title-section h1 {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  font-size: 1.3em;
+  font-size: 1.5em;
   font-weight: 700;
   margin-bottom: 2px;
   line-height: 1.2;
@@ -111,7 +114,7 @@ header {
 
 .header-info {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   padding-top: 8px;
   border-top: 1px solid rgba(13, 148, 136, 0.2);
@@ -119,8 +122,8 @@ header {
 
 #node-info {
   display: flex;
-  gap: 16px;
-  font-size: 0.9em;
+  gap: 10px;
+  font-size: 0.85em;
   align-items: center;
 }
 
@@ -823,16 +826,65 @@ main {
   margin-bottom: 12px;
 }
 
+/* Internet connection row */
+.network-internet-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.network-internet-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8em;
+  font-weight: 500;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
+  border: 1px solid var(--card-border);
+  background: rgba(13, 47, 40, 0.8);
+}
+
+.network-internet-pill .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.network-internet-pill.online {
+  border-color: var(--success-color);
+}
+
+.network-internet-pill.online .status-dot {
+  background: var(--success-color);
+  box-shadow: 0 0 8px var(--success-color);
+}
+
+.network-internet-pill.online span:last-child {
+  color: #4ade80;
+}
+
+.network-internet-pill.offline {
+  border-color: var(--error-color);
+}
+
+.network-internet-pill.offline .status-dot {
+  background: var(--error-color);
+  box-shadow: 0 0 6px var(--error-color);
+}
+
+.network-internet-pill.offline span:last-child {
+  color: #f87171;
+}
+
 .network-interfaces {
   display: grid;
   gap: 8px;
 }
 
 .network-interface {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 10px;
   padding: 10px 12px;
   background: rgba(13, 148, 136, 0.06);
   border-radius: 6px;
@@ -844,15 +896,12 @@ main {
   border-color: var(--card-border-hover);
 }
 
-.network-interface.wan {
-  border-color: rgba(34, 197, 94, 0.4);
-  background: rgba(34, 197, 94, 0.08);
-}
-
-.interface-header {
+.interface-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 2px;
 }
 
 .interface-name {
@@ -861,25 +910,11 @@ main {
   color: var(--sai-text);
 }
 
-.interface-badge {
-  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
-  font-size: 0.55em;
-  padding: 2px 5px;
-  border-radius: 3px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.interface-badge.wan {
-  background: var(--success-color);
-  color: white;
-}
-
 .interface-ip {
   font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.8em;
   color: var(--sai-text);
+  text-align: right;
 }
 
 .interface-type {
@@ -1198,45 +1233,56 @@ footer p {
   gap: 8px;
 }
 
-/* Service Status Indicator */
-.service-status {
+/* Unified Node Status Indicator */
+.node-status {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 0.7em;
-  padding: 3px 8px;
+  gap: 6px;
+  font-size: 0.75em;
+  padding: 4px 10px;
   background: rgba(13, 47, 40, 0.8);
   border: 1px solid var(--card-border);
-  border-radius: 12px;
+  border-radius: 20px;
 }
 
-.service-status .status-dot {
-  width: 6px;
-  height: 6px;
+.node-status .status-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--sai-text-muted);
+  transition: all 0.3s ease;
 }
 
-.service-status .status-text {
-  font-family: ui-monospace, 'SF Mono', Monaco, monospace;
-  font-size: 0.9em;
+.node-status .status-text {
+  font-weight: 500;
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.95em;
 }
 
-.service-status.active .status-dot {
+.node-status.live .status-dot {
   background: var(--success-color);
-  box-shadow: 0 0 6px var(--success-color);
+  box-shadow: 0 0 8px var(--success-color);
 }
 
-.service-status.active .status-text {
+.node-status.live .status-text {
   color: #4ade80;
 }
 
-.service-status.stopped .status-dot {
-  background: var(--error-color);
-  box-shadow: 0 0 6px var(--error-color);
+.node-status.warning .status-dot {
+  background: #facc15;
+  box-shadow: 0 0 6px #facc15;
 }
 
-.service-status.stopped .status-text {
+.node-status.warning .status-text {
+  color: #facc15;
+}
+
+.node-status.disconnected .status-dot {
+  background: var(--error-color);
+  animation: pulse-dot 1.5s infinite;
+}
+
+.node-status.disconnected .status-text {
   color: #f87171;
 }
 
@@ -1283,50 +1329,6 @@ footer p {
   font-family: ui-monospace, 'SF Mono', Monaco, monospace;
 }
 
-/* Connection Status Indicator - Pill style */
-
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.75em;
-  padding: 4px 10px;
-  background: rgba(13, 47, 40, 0.8);
-  border: 1px solid var(--card-border);
-  border-radius: 20px;
-}
-
-.connection-status .status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--sai-text-muted);
-  transition: all 0.3s ease;
-}
-
-.connection-status .status-text {
-  font-weight: 500;
-  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
-  font-size: 0.95em;
-}
-
-.connection-status.connected .status-dot {
-  background: var(--success-color);
-  box-shadow: 0 0 8px var(--success-color);
-}
-
-.connection-status.connected .status-text {
-  color: #4ade80;
-}
-
-.connection-status.disconnected .status-dot {
-  background: var(--error-color);
-  animation: pulse-dot 1.5s infinite;
-}
-
-.connection-status.disconnected .status-text {
-  color: #f87171;
-}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -1345,35 +1347,55 @@ footer p {
     position: relative;
   }
 
-  .header-top {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
+  header > .container {
+    display: grid;
+    grid-template-areas:
+      "logo title title"
+      "nodeinfo nodeinfo status";
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    row-gap: 0;
+    column-gap: 8px;
   }
 
-  .logo-section {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+  .header-top,
+  .header-info {
+    display: contents;
   }
 
   .logo {
+    grid-area: logo;
     height: 40px;
+  }
+
+  .title-section {
+    grid-area: title;
+    position: static;
+    transform: none;
+    text-align: right;
   }
 
   .title-section h1 {
     font-size: 1.3em;
   }
 
-  .header-info {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
+  #node-info {
+    grid-area: nodeinfo;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+    border-top: 1px solid rgba(13, 148, 136, 0.2);
+    padding-top: 8px;
   }
 
-  #node-info {
-    flex-direction: column;
-    gap: 4px;
+  .header-status {
+    grid-area: status;
+    justify-self: end;
+    align-self: center;
+    border-top: 1px solid rgba(13, 148, 136, 0.2);
+    padding-top: 8px;
+    white-space: nowrap;
   }
 
   #network-info {
@@ -1503,20 +1525,8 @@ footer p {
     padding: 0 12px;
   }
 
-  .header-info {
-    align-items: center;
-    width: 100%;
-  }
-
   #node-info {
-    align-items: center;
-    text-align: center;
-    width: 100%;
-  }
-
-  #network-info {
-    align-items: center;
-    width: 100%;
+    font-size: 0.8em;
   }
 
   main {
