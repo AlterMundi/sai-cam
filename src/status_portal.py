@@ -22,6 +22,13 @@ import psutil
 import yaml
 from flask import Flask, jsonify, send_from_directory, Response, request, stream_with_context
 
+# Prometheus metrics (optional dependency)
+try:
+    from prometheus_client import Gauge, Info, generate_latest, CONTENT_TYPE_LATEST
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    PROMETHEUS_AVAILABLE = False
+
 # Add parent directory to path for imports
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
@@ -40,6 +47,44 @@ app = Flask(__name__, static_folder='portal', static_url_path='')
 config = {}
 logger = None
 start_time = time.time()
+
+# Prometheus metric definitions (only if prometheus_client is installed)
+if PROMETHEUS_AVAILABLE:
+    # Node info
+    saicam_node_info = Info('saicam_node', 'SAI-Cam node information')
+
+    # System resources
+    saicam_cpu_percent = Gauge('saicam_cpu_percent', 'CPU usage percentage')
+    saicam_memory_percent = Gauge('saicam_memory_percent', 'Memory usage percentage')
+    saicam_disk_percent = Gauge('saicam_disk_percent', 'Disk usage percentage')
+    saicam_temperature_celsius = Gauge('saicam_temperature_celsius', 'CPU temperature in Celsius')
+    saicam_system_uptime_seconds = Gauge('saicam_system_uptime_seconds', 'System uptime in seconds')
+    saicam_service_uptime_seconds = Gauge('saicam_service_uptime_seconds', 'Service uptime in seconds')
+
+    # Camera metrics
+    saicam_camera_state = Gauge('saicam_camera_state', 'Camera state (0=healthy, 1=failing, 2=offline)', ['camera_id'])
+    saicam_camera_online = Gauge('saicam_camera_online', 'Camera online status (1/0)', ['camera_id', 'camera_type', 'position'])
+    saicam_camera_consecutive_failures = Gauge('saicam_camera_consecutive_failures', 'Camera consecutive failure count', ['camera_id'])
+    saicam_camera_backoff_multiplier = Gauge('saicam_camera_backoff_multiplier', 'Camera reconnect backoff multiplier', ['camera_id'])
+    saicam_camera_last_success_age_seconds = Gauge('saicam_camera_last_success_age_seconds', 'Seconds since last successful capture', ['camera_id'])
+    saicam_camera_thread_alive = Gauge('saicam_camera_thread_alive', 'Camera thread alive status (1/0)', ['camera_id'])
+
+    # Storage metrics
+    saicam_storage_total_images = Gauge('saicam_storage_total_images', 'Total images in storage')
+    saicam_storage_pending_images = Gauge('saicam_storage_pending_images', 'Pending images awaiting upload')
+    saicam_storage_size_mb = Gauge('saicam_storage_size_mb', 'Storage size in megabytes')
+
+    # Thread metrics
+    saicam_threads_total = Gauge('saicam_threads_total', 'Total camera threads')
+    saicam_threads_alive = Gauge('saicam_threads_alive', 'Alive camera threads')
+
+    # Health metrics
+    saicam_health_checks_total = Gauge('saicam_health_checks_total', 'Total health checks performed')
+    saicam_health_warnings_total = Gauge('saicam_health_warnings_total', 'Total health warnings')
+    saicam_health_errors_total = Gauge('saicam_health_errors_total', 'Total health errors')
+
+    # Network
+    saicam_upstream_online = Gauge('saicam_upstream_online', 'Upstream internet connectivity (1/0)')
 
 def load_config(config_path='/etc/sai-cam/config.yaml'):
     """Load configuration from YAML file"""
@@ -901,6 +946,106 @@ def api_set_log_level():
     except Exception as e:
         logger.error(f"Failed to set log level: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+def _update_prometheus_metrics():
+    """Collect current metrics and update Prometheus gauges on-demand"""
+    # Node info
+    saicam_node_info.info({
+        'node_id': config.get('device', {}).get('id', 'unknown'),
+        'location': config.get('device', {}).get('location', 'unknown'),
+        'version': VERSION,
+    })
+
+    # System resources
+    sys_info = get_system_info()
+    if sys_info:
+        saicam_cpu_percent.set(sys_info.get('cpu_percent', 0))
+        saicam_memory_percent.set(sys_info.get('memory_percent', 0))
+        saicam_disk_percent.set(sys_info.get('disk_percent', 0))
+        temp = sys_info.get('temperature')
+        if temp is not None:
+            saicam_temperature_celsius.set(temp)
+        saicam_system_uptime_seconds.set(sys_info.get('system_uptime', 0))
+        saicam_service_uptime_seconds.set(sys_info.get('service_uptime', 0))
+
+    # Camera metrics from health socket
+    health_data = query_health_socket()
+    health_cameras = health_data.get('cameras', {}) if health_data else {}
+    failed_cameras = health_data.get('failed_cameras', {}) if health_data else {}
+
+    threads_total = 0
+    threads_alive = 0
+
+    for cam_config in config.get('cameras', []):
+        cam_id = cam_config['id']
+        cam_type = cam_config.get('type', 'unknown')
+        position = cam_config.get('position', '')
+        cam_health = health_cameras.get(cam_id, {})
+        is_failed = cam_id in failed_cameras
+
+        # State: 0=healthy, 1=failing, 2=offline
+        state_str = cam_health.get('state', 'offline')
+        if is_failed:
+            state_val = 2
+        elif state_str == 'healthy':
+            state_val = 0
+        elif state_str == 'failing':
+            state_val = 1
+        else:
+            state_val = 2
+
+        online = 1 if (state_str == 'healthy' and cam_health.get('thread_alive', False)) else 0
+
+        saicam_camera_state.labels(camera_id=cam_id).set(state_val)
+        saicam_camera_online.labels(camera_id=cam_id, camera_type=cam_type, position=position).set(online)
+        saicam_camera_consecutive_failures.labels(camera_id=cam_id).set(cam_health.get('consecutive_failures', 0))
+        saicam_camera_backoff_multiplier.labels(camera_id=cam_id).set(cam_health.get('backoff_multiplier', 1))
+
+        last_age = cam_health.get('last_success_age')
+        if last_age is not None:
+            saicam_camera_last_success_age_seconds.labels(camera_id=cam_id).set(last_age)
+
+        thread_alive = 1 if cam_health.get('thread_alive', False) else 0
+        saicam_camera_thread_alive.labels(camera_id=cam_id).set(thread_alive)
+
+        threads_total += 1
+        threads_alive += thread_alive
+
+    saicam_threads_total.set(threads_total)
+    saicam_threads_alive.set(threads_alive)
+
+    # Storage
+    storage_info = get_storage_info()
+    if storage_info:
+        saicam_storage_total_images.set(storage_info.get('total_images', 0))
+        saicam_storage_pending_images.set(storage_info.get('pending_images', 0))
+        saicam_storage_size_mb.set(storage_info.get('total_size_mb', 0))
+
+    # Health monitor counters
+    if health_data:
+        hm = health_data.get('health_monitor', {})
+        saicam_health_checks_total.set(hm.get('checks_performed', 0))
+        saicam_health_warnings_total.set(hm.get('warnings_issued', 0))
+        saicam_health_errors_total.set(hm.get('errors_detected', 0))
+
+    # Network
+    net_info = get_network_info()
+    if net_info:
+        saicam_upstream_online.set(1 if net_info.get('upstream_online', False) else 0)
+
+
+@app.route('/metrics')
+def prometheus_metrics():
+    """Prometheus metrics endpoint"""
+    if not PROMETHEUS_AVAILABLE:
+        return Response('prometheus_client not installed', status=501, mimetype='text/plain')
+
+    if not config.get('metrics', {}).get('enabled', True):
+        return Response('Metrics disabled', status=404, mimetype='text/plain')
+
+    _update_prometheus_metrics()
+    return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
 
 def main():

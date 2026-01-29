@@ -16,6 +16,7 @@ systemd-python>=235  # For systemd watchdog support
 
 # Status portal
 flask>=3.0.0         # For web status portal
+prometheus-client>=0.20.0  # Prometheus metrics endpoint
 
 # Development and testing (optional)
 pytest>=7.0.0        # For unit testing

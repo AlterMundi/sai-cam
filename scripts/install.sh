@@ -4,6 +4,7 @@ set -e
 # Default values
 PRESERVE_CONFIG=false
 PORTAL_ONLY=false
+INSTALL_MONITORING=false
 
 # Function to display help information
 show_help() {
@@ -27,6 +28,10 @@ OPTIONS:
                               venv, camera service, config, nginx, or cron.
                               Requires SAI-CAM to be already fully installed.
                               Only restarts the sai-cam-portal service.
+    --monitoring              Install vmagent metrics shipper alongside the main
+                              service. Downloads vmagent binary, creates scrape
+                              config, and registers a systemd service that pushes
+                              Prometheus metrics to a remote VictoriaMetrics instance.
     -h, --help               Show this help message and exit
 
 EXAMPLES:
@@ -153,6 +158,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --portal)
             PORTAL_ONLY=true
+            shift
+            ;;
+        --monitoring)
+            INSTALL_MONITORING=true
             shift
             ;;
         -h|--help)
@@ -1289,6 +1298,122 @@ else
     echo "ℹ️  Hardware watchdog not available (not a Raspberry Pi?)"
 fi
 
+# ══════════════════════════════════════════════════════════════════════════════
+# vmagent metrics shipper (optional, --monitoring flag)
+# ══════════════════════════════════════════════════════════════════════════════
+if [ "$INSTALL_MONITORING" = true ]; then
+    echo ""
+    echo "📈 Installing vmagent Metrics Shipper"
+    echo "-------------------------------------"
+
+    VMAGENT_VERSION="v1.106.1"
+    VMAGENT_DIR="$INSTALL_DIR/vmagent"
+
+    # Detect architecture
+    ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
+    case "$ARCH" in
+        amd64|x86_64)  ARCH="amd64" ;;
+        arm64|aarch64) ARCH="arm64" ;;
+        armhf|armv7l)  ARCH="arm"   ;;
+        *)
+            echo "❌ Unsupported architecture: $ARCH"
+            echo "   vmagent installation skipped"
+            INSTALL_MONITORING=false
+            ;;
+    esac
+
+    if [ "$INSTALL_MONITORING" = true ]; then
+        sudo mkdir -p "$VMAGENT_DIR/buffer"
+
+        # Download vmagent if not present or version mismatch
+        NEED_DOWNLOAD=true
+        if [ -f "$VMAGENT_DIR/vmagent-prod" ]; then
+            CURRENT_VER=$("$VMAGENT_DIR/vmagent-prod" -version 2>&1 | head -1 || echo "unknown")
+            if echo "$CURRENT_VER" | grep -q "${VMAGENT_VERSION#v}"; then
+                echo "✅ vmagent $VMAGENT_VERSION already installed"
+                NEED_DOWNLOAD=false
+            fi
+        fi
+
+        if [ "$NEED_DOWNLOAD" = true ]; then
+            TARBALL="vmutils-linux-${ARCH}-${VMAGENT_VERSION}.tar.gz"
+            DOWNLOAD_URL="https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/${VMAGENT_VERSION}/${TARBALL}"
+            echo "📥 Downloading vmagent ${VMAGENT_VERSION} (${ARCH})..."
+            echo "   URL: $DOWNLOAD_URL"
+            if wget -q --show-progress -O "/tmp/${TARBALL}" "$DOWNLOAD_URL"; then
+                echo "📦 Extracting vmagent-prod binary..."
+                tar -xzf "/tmp/${TARBALL}" -C "$VMAGENT_DIR" vmagent-prod
+                rm -f "/tmp/${TARBALL}"
+                sudo chmod 755 "$VMAGENT_DIR/vmagent-prod"
+                echo "✅ vmagent binary installed to $VMAGENT_DIR/vmagent-prod"
+            else
+                echo "❌ Failed to download vmagent"
+                echo "   Check network connectivity and try again"
+                INSTALL_MONITORING=false
+            fi
+        fi
+    fi
+
+    if [ "$INSTALL_MONITORING" = true ]; then
+        # Read config values for vmagent
+        NODE_ID=$(read_config_value "device.id" "unknown")
+
+        # Read remote_write_url from config.yaml (metrics.remote_write_url)
+        REMOTE_WRITE_URL=$(python3 -c "
+import yaml, sys
+try:
+    with open('$PROJECT_ROOT/config/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_url', 'http://netmaker.altermundi.net:8428/api/v1/write'))
+except Exception:
+    print('http://netmaker.altermundi.net:8428/api/v1/write')
+" 2>/dev/null)
+        # Fallback if python fails
+        REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"http://netmaker.altermundi.net:8428/api/v1/write"}
+
+        echo "🔧 Configuring vmagent..."
+        echo "   Node ID:          $NODE_ID"
+        echo "   Remote Write URL: $REMOTE_WRITE_URL"
+
+        # Generate scrape config from template
+        export NODE_ID
+        envsubst < "$PROJECT_ROOT/config/vmagent-scrape.yml" | sudo tee /etc/sai-cam/vmagent-scrape.yml > /dev/null
+        echo "   ✅ Scrape config: /etc/sai-cam/vmagent-scrape.yml"
+
+        # Create auth env file (empty by default, populate with VM_AUTH_USER/VM_AUTH_PASSWORD if needed)
+        if [ ! -f /etc/sai-cam/vmagent-auth.env ]; then
+            sudo touch /etc/sai-cam/vmagent-auth.env
+            sudo chmod 600 /etc/sai-cam/vmagent-auth.env
+            sudo chown $SYSTEM_USER:$SYSTEM_GROUP /etc/sai-cam/vmagent-auth.env
+        fi
+        echo "   ✅ Auth env: /etc/sai-cam/vmagent-auth.env"
+
+        # Generate systemd service from template
+        export REMOTE_WRITE_URL
+        envsubst < "$PROJECT_ROOT/systemd/vmagent.service.template" | sudo tee /etc/systemd/system/vmagent.service > /dev/null
+        echo "   ✅ Service: /etc/systemd/system/vmagent.service"
+
+        # Set permissions
+        sudo chown -R "$SYSTEM_USER:$SYSTEM_GROUP" "$VMAGENT_DIR"
+
+        # Enable and start vmagent
+        sudo systemctl daemon-reload
+        sudo systemctl enable vmagent
+        if sudo systemctl restart vmagent; then
+            sleep 2
+            if systemctl is-active --quiet vmagent; then
+                echo "✅ vmagent is running and shipping metrics"
+            else
+                echo "⚠️  vmagent was started but is not active"
+                echo "   Check logs: sudo journalctl -u vmagent -n 20"
+            fi
+        else
+            echo "❌ Failed to start vmagent"
+            echo "   Check logs: sudo journalctl -u vmagent -n 20"
+        fi
+    fi
+fi
+
 # Create health check script
 echo "📊 Creating health check script..."
 sudo tee "$INSTALL_DIR/check_health.sh" > /dev/null << 'HEALTHSCRIPT'
@@ -1311,6 +1436,7 @@ echo "Services Status:"
 echo "----------------"
 systemctl is-active sai-cam > /dev/null && echo "✓ sai-cam: running" || echo "✗ sai-cam: stopped"
 systemctl is-active sai-cam-portal > /dev/null && echo "✓ portal: running" || echo "✗ portal: stopped"
+systemctl is-active vmagent > /dev/null 2>&1 && echo "✓ vmagent: running" || echo "- vmagent: not installed"
 systemctl is-active watchdog > /dev/null && echo "✓ watchdog: running" || echo "✗ watchdog: not running"
 echo
 
@@ -1353,6 +1479,13 @@ if [ "$PRESERVE_CONFIG" = true ]; then
     echo ""
     echo "⚠️  Note: Configuration was preserved from production"
     echo "   To update config: sudo nano $CONFIG_DIR/config.yaml && sudo systemctl restart sai-cam"
+fi
+echo ""
+if [ "$INSTALL_MONITORING" = true ]; then
+    echo "📈 Monitoring:"
+    echo "  • vmagent status: sudo systemctl status vmagent"
+    echo "  • Metrics endpoint: curl http://localhost:8090/metrics"
+    echo "  • Remote write: $REMOTE_WRITE_URL"
 fi
 echo ""
 echo "📚 For troubleshooting, see the documentation in docs/"

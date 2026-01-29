@@ -1,0 +1,29 @@
+[Unit]
+Description=vmagent - SAI-Cam metrics shipper
+Documentation=https://docs.victoriametrics.com/vmagent/
+After=network-online.target sai-cam-portal.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${SYSTEM_USER}
+Group=${SYSTEM_GROUP}
+EnvironmentFile=-/etc/sai-cam/vmagent-auth.env
+ExecStart=${INSTALL_DIR}/vmagent/vmagent-prod \
+    -promscrape.config=/etc/sai-cam/vmagent-scrape.yml \
+    -remoteWrite.url=${REMOTE_WRITE_URL} \
+    -remoteWrite.tmpDataPath=${INSTALL_DIR}/vmagent/buffer \
+    -remoteWrite.maxDiskUsagePerURL=100MB \
+    -loggerLevel=WARN
+Restart=on-failure
+RestartSec=30
+
+# Security hardening
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=${INSTALL_DIR}/vmagent/buffer
+
+[Install]
+WantedBy=multi-user.target
