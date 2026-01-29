@@ -282,20 +282,20 @@ def get_storage_info():
         return None
 
     try:
-        # Count images
-        images = list(storage_path.glob('*.jpg'))
+        # Count images: root = pending, uploaded/ = already sent
+        pending_images = list(storage_path.glob('*.jpg'))
         uploaded_path = storage_path / 'uploaded'
         uploaded_images = list(uploaded_path.glob('*.jpg')) if uploaded_path.exists() else []
 
         # Calculate sizes
-        total_size = sum(f.stat().st_size for f in images) / 1024 / 1024  # MB
+        pending_size = sum(f.stat().st_size for f in pending_images) / 1024 / 1024  # MB
         uploaded_size = sum(f.stat().st_size for f in uploaded_images) / 1024 / 1024
 
         return {
-            'total_images': len(images),
+            'total_images': len(pending_images) + len(uploaded_images),
             'uploaded_images': len(uploaded_images),
-            'pending_images': len(images) - len(uploaded_images),
-            'total_size_mb': round(total_size, 2),
+            'pending_images': len(pending_images),
+            'total_size_mb': round(pending_size + uploaded_size, 2),
             'uploaded_size_mb': round(uploaded_size, 2),
             'max_size_gb': config.get('storage', {}).get('max_size_gb', 0),
             'cleanup_threshold_gb': config.get('storage', {}).get('cleanup_threshold_gb', 0)
