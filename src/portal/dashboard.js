@@ -161,12 +161,10 @@ const BLOCKS = {
             <span class="camera-type">${cam.type.toUpperCase()}</span>
             <span class="camera-address-inline">${cam.address}</span>
           </div>
-          ${cam.position !== undefined ? `
-            <div class="camera-position-row">
-              <span>📍 ${cam.position || 'not set'}</span>
-              <button class="btn-icon" onclick="editCameraPosition('${cam.id}', '${cam.position || ''}')" title="Edit position">✏</button>
-            </div>
-          ` : ''}
+          <div class="camera-position-row" onclick="editCameraPosition(this, '${cam.id}')" title="Click to edit position">
+            <span class="camera-position-text">📍 ${cam.position || 'not set'}</span>
+            <span class="btn-icon">✏</span>
+          </div>
           <div class="camera-thumbnail-area">
             ${cam.latest_image ? `
               <div class="camera-thumbnail" onclick="openImageModal('${cam.id}', '${cam.id} - ${cam.position || ''}')" title="Click to enlarge">
@@ -845,25 +843,63 @@ async function restartCamera(cameraId) {
   }
 }
 
-async function editCameraPosition(cameraId, currentPosition) {
-  const position = prompt('Camera position/orientation:', currentPosition);
-  if (position === null) return;  // cancelled
-  try {
-    const response = await fetch(`/api/cameras/${cameraId}/position`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ position })
-    });
-    const result = await response.json();
-    if (result.ok) {
-      showNotification(`Position updated for ${cameraId}`, 'success');
-      manualRefresh();
-    } else {
-      showNotification(result.error || 'Failed', 'error');
+function editCameraPosition(row, cameraId) {
+  // Already editing
+  if (row.querySelector('input')) return;
+
+  const textSpan = row.querySelector('.camera-position-text');
+  const currentText = textSpan.textContent.replace(/^📍\s*/, '');
+  const currentValue = currentText === 'not set' ? '' : currentText;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'position-inline-input';
+  input.value = currentValue;
+  input.placeholder = 'e.g. north, entrance...';
+
+  textSpan.style.display = 'none';
+  row.querySelector('.btn-icon').style.display = 'none';
+  row.insertBefore(input, textSpan);
+  input.focus();
+  input.select();
+
+  async function save() {
+    const position = input.value.trim();
+    input.disabled = true;
+    try {
+      const response = await fetch(`/api/cameras/${cameraId}/position`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position })
+      });
+      const result = await response.json();
+      if (result.ok) {
+        showNotification(`Position updated for ${cameraId}`, 'success');
+        manualRefresh();
+      } else {
+        showNotification(result.error || 'Failed', 'error');
+        revert();
+      }
+    } catch (e) {
+      showNotification('Service unavailable', 'error');
+      revert();
     }
-  } catch (e) {
-    showNotification('Service unavailable', 'error');
   }
+
+  function revert() {
+    input.remove();
+    textSpan.style.display = '';
+    row.querySelector('.btn-icon').style.display = '';
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); save(); }
+    if (e.key === 'Escape') { e.preventDefault(); revert(); }
+  });
+  input.addEventListener('blur', save);
+
+  // Stop click from bubbling back to the row
+  input.addEventListener('click', (e) => e.stopPropagation());
 }
 
 // ========================================

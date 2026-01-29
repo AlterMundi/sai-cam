@@ -1078,6 +1078,7 @@ echo "---------------------------"
 echo "🔧 Configuring ownership and permissions..."
 sudo chown -R $SYSTEM_USER:$SYSTEM_GROUP $INSTALL_DIR
 sudo chown -R $SYSTEM_USER:$SYSTEM_GROUP $LOG_DIR
+sudo chown $SYSTEM_USER:$SYSTEM_GROUP $CONFIG_DIR/config.yaml
 sudo chmod 644 $CONFIG_DIR/config.yaml
 sudo chmod 644 /etc/nginx/sites-available/camera-proxy
 sudo chmod 644 /etc/systemd/system/sai-cam.service

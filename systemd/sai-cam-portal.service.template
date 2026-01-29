@@ -20,8 +20,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${LOG_DIR} ${INSTALL_DIR}/storage
-ReadOnlyPaths=${CONFIG_DIR}
+ReadWritePaths=${LOG_DIR} ${INSTALL_DIR}/storage ${CONFIG_DIR}
 
 [Install]
 WantedBy=multi-user.target
