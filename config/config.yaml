@@ -103,7 +103,7 @@ advanced:
 # Metrics / Monitoring (optional)
 metrics:
   enabled: true
-  remote_write_url: 'http://netmaker.altermundi.net:8428/api/v1/write'
+  remote_write_url: 'http://131.72.205.6:8428/api/v1/write'
 
 # Status Portal Configuration (optional - uses smart defaults if omitted)
 portal:

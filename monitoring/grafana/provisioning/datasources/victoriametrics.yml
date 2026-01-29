@@ -4,11 +4,7 @@ datasources:
   - name: VictoriaMetrics
     type: prometheus
     access: proxy
-    url: http://victoriametrics:8428
+    url: http://sai-victoriametrics:8428
     isDefault: true
-    basicAuth: true
-    basicAuthUser: ${VM_AUTH_USER:-admin}
-    secureJsonData:
-      basicAuthPassword: ${VM_AUTH_PASSWORD:-changeme}
     jsonData:
       timeInterval: '30s'
