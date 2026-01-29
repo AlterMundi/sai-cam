@@ -3,6 +3,7 @@ set -e
 
 # Default values
 PRESERVE_CONFIG=false
+PORTAL_ONLY=false
 
 # Function to display help information
 show_help() {
@@ -18,15 +19,25 @@ USAGE:
     sudo ./install.sh [OPTIONS]
 
 OPTIONS:
-    -p, --preserve-config     Update code only, preserve existing configuration
+    -p, --preserve-config     Update ALL code files, preserve existing configuration.
+                              Runs full installation pipeline (network, packages,
+                              venv, services) but keeps /etc/sai-cam/config.yaml.
+    --portal                  Update ONLY the web portal (status_portal.py and
+                              portal/ web assets). Does NOT touch network, packages,
+                              venv, camera service, config, nginx, or cron.
+                              Requires SAI-CAM to be already fully installed.
+                              Only restarts the sai-cam-portal service.
     -h, --help               Show this help message and exit
 
 EXAMPLES:
-    # Full installation (requires sudo)
+    # Full installation (first time, requires sudo)
     sudo ./install.sh
 
-    # Update code and preserve production configuration
+    # Update ALL code and preserve production configuration
     sudo ./install.sh --preserve-config
+
+    # Update ONLY the web portal (fast, safe for remote SSH)
+    sudo ./install.sh --portal
 
     # Show help
     ./install.sh --help
@@ -63,12 +74,25 @@ Full Installation:
     NOTE: If a production config exists at /etc/sai-cam/config.yaml and differs
     from the repository config, you will be prompted to choose which to keep.
 
-Code-Only Update (-p flag):
+Code-Only Update (--preserve-config):
     1. Backs up existing files
     2. Updates all code files (camera_service.py, camera modules, etc.)
     3. Updates systemd service, nginx proxy, and logrotate configs
     4. Preserves existing /etc/sai-cam/config.yaml
-    5. Restarts service to apply code changes
+    5. Restarts ALL services to apply code changes
+    NOTE: This still runs the full pipeline (network, packages, venv, services).
+    It only preserves the config file — everything else is updated.
+
+Portal-Only Update (--portal):
+    1. Verifies SAI-CAM is already fully installed
+    2. Copies status_portal.py and portal/ web assets to /opt/sai-cam/
+    3. Sets correct ownership and file permissions
+    4. Restarts ONLY the sai-cam-portal service
+    5. Does NOT touch: network, packages, venv, camera service, config,
+       nginx, systemd templates, logrotate, WiFi AP, cron, or watchdog
+    NOTE: This is the safest and fastest update mode. It will not drop
+    SSH connections or disrupt camera capture. Use this when you have
+    only changed the web portal code.
 
 CONFIGURATION:
     Edit config/config.yaml before running this script. Key sections:
@@ -125,6 +149,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -p|--preserve-config)
             PRESERVE_CONFIG=true
+            shift
+            ;;
+        --portal)
+            PORTAL_ONLY=true
             shift
             ;;
         -h|--help)
@@ -467,6 +495,179 @@ if [ "$EUID" -ne 0 ]; then
     echo "Usage: sudo $0 [OPTIONS]"
     echo "Try '$0 --help' for more information."
     exit 1
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fast path: portal-only update (--portal)
+#
+# This mode ONLY updates the status portal web interface files and restarts
+# the sai-cam-portal systemd service. It is designed for rapid iteration on
+# the portal UI/backend without touching any other part of the system.
+#
+# What this mode DOES:
+#   - Copies src/status_portal.py → /opt/sai-cam/status_portal.py
+#   - Copies src/portal/* → /opt/sai-cam/portal/
+#   - Sets correct ownership and permissions on copied files
+#   - Restarts ONLY the sai-cam-portal service
+#   - Verifies the portal service is running after restart
+#
+# What this mode does NOT do:
+#   - Does NOT reconfigure the network (no NetworkManager changes)
+#   - Does NOT install or update system packages (no apt-get)
+#   - Does NOT create or modify the Python virtual environment
+#   - Does NOT touch the camera service (sai-cam.service is left as-is)
+#   - Does NOT copy camera_service.py, cameras/, config_helper.py, logging_utils.py
+#   - Does NOT update or overwrite /etc/sai-cam/config.yaml
+#   - Does NOT modify systemd service templates or logrotate configs
+#   - Does NOT configure Nginx, WiFi AP, sudoers, cron jobs, or watchdog
+#   - Does NOT create backups (no files outside portal scope are touched)
+#
+# Prerequisites:
+#   - SAI-CAM must already be fully installed (run install.sh first)
+#   - The sai-cam-portal systemd service must already be registered
+#   - /opt/sai-cam/ directory must exist with correct structure
+# ══════════════════════════════════════════════════════════════════════════════
+if [ "$PORTAL_ONLY" = true ]; then
+    echo ""
+    echo "🌐 SAI-CAM Portal-Only Update"
+    echo "════════════════════════════════════════════════════════"
+    echo "  Mode:   --portal (fast path — portal files only)"
+    echo "  Scope:  status_portal.py + portal/ web assets"
+    echo "  Target: $INSTALL_DIR/"
+    echo "════════════════════════════════════════════════════════"
+    echo ""
+
+    # ── Pre-flight checks ────────────────────────────────────────────────────
+    echo "🔍 Running pre-flight checks..."
+    PREFLIGHT_FAILED=false
+
+    # 1. Verify SAI-CAM is already installed
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "   ❌ Installation directory not found: $INSTALL_DIR"
+        echo "      SAI-CAM must be fully installed before using --portal."
+        echo "      Run: sudo ./install.sh"
+        PREFLIGHT_FAILED=true
+    else
+        echo "   ✅ Installation directory exists: $INSTALL_DIR"
+    fi
+
+    # 2. Verify portal directory exists in installation
+    if [ ! -d "$INSTALL_DIR/portal" ]; then
+        echo "   ❌ Portal directory not found: $INSTALL_DIR/portal/"
+        echo "      SAI-CAM must be fully installed before using --portal."
+        echo "      Run: sudo ./install.sh"
+        PREFLIGHT_FAILED=true
+    else
+        echo "   ✅ Portal directory exists: $INSTALL_DIR/portal/"
+    fi
+
+    # 3. Verify the portal systemd service is registered
+    if ! systemctl list-unit-files sai-cam-portal.service >/dev/null 2>&1; then
+        echo "   ❌ sai-cam-portal.service is not registered with systemd"
+        echo "      SAI-CAM must be fully installed before using --portal."
+        echo "      Run: sudo ./install.sh"
+        PREFLIGHT_FAILED=true
+    else
+        echo "   ✅ sai-cam-portal.service is registered"
+    fi
+
+    # 4. Verify source files exist in the repository
+    if [ ! -f "$PROJECT_ROOT/src/status_portal.py" ]; then
+        echo "   ❌ Source file not found: src/status_portal.py"
+        PREFLIGHT_FAILED=true
+    else
+        echo "   ✅ Source: src/status_portal.py"
+    fi
+
+    if [ ! -d "$PROJECT_ROOT/src/portal" ]; then
+        echo "   ❌ Source directory not found: src/portal/"
+        PREFLIGHT_FAILED=true
+    else
+        PORTAL_FILE_COUNT=$(find "$PROJECT_ROOT/src/portal" -type f | wc -l)
+        echo "   ✅ Source: src/portal/ ($PORTAL_FILE_COUNT files)"
+    fi
+
+    # 5. Verify system user/group exist
+    if ! id "$SYSTEM_USER" >/dev/null 2>&1; then
+        echo "   ❌ System user not found: $SYSTEM_USER"
+        echo "      SAI-CAM must be fully installed before using --portal."
+        PREFLIGHT_FAILED=true
+    else
+        echo "   ✅ System user exists: $SYSTEM_USER"
+    fi
+
+    # Abort if any pre-flight check failed
+    if [ "$PREFLIGHT_FAILED" = true ]; then
+        echo ""
+        echo "❌ Portal update aborted: pre-flight checks failed."
+        echo ""
+        echo "   The --portal flag is ONLY for updating the web portal on an"
+        echo "   already-installed SAI-CAM system. For first-time installation"
+        echo "   or full updates, use:"
+        echo ""
+        echo "     sudo ./install.sh                  # Full installation"
+        echo "     sudo ./install.sh --preserve-config # Code update (all components)"
+        echo ""
+        exit 1
+    fi
+
+    echo ""
+    echo "   All pre-flight checks passed."
+    echo ""
+
+    # ── Copy portal files ────────────────────────────────────────────────────
+    echo "📄 Copying portal files..."
+
+    echo "   status_portal.py → $INSTALL_DIR/status_portal.py"
+    sudo cp "$PROJECT_ROOT/src/status_portal.py" "$INSTALL_DIR/status_portal.py"
+
+    echo "   src/portal/* → $INSTALL_DIR/portal/"
+    sudo cp -r "$PROJECT_ROOT/src/portal/"* "$INSTALL_DIR/portal/"
+
+    # ── Set ownership and permissions ────────────────────────────────────────
+    echo "🔐 Setting ownership and permissions..."
+    sudo chown "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/status_portal.py"
+    sudo chown -R "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/portal"
+    sudo chmod 755 "$INSTALL_DIR/status_portal.py"
+    sudo find "$INSTALL_DIR/portal" -type f -exec chmod 644 {} \;
+    sudo find "$INSTALL_DIR/portal" -type d -exec chmod 755 {} \;
+    echo "   ✅ Ownership: $SYSTEM_USER:$SYSTEM_GROUP"
+    echo "   ✅ Permissions: 755 (portal.py), 644 (assets), 755 (dirs)"
+
+    # ── Restart portal service only ──────────────────────────────────────────
+    echo "🔄 Restarting sai-cam-portal service..."
+    echo "   (sai-cam camera service is NOT being restarted)"
+    if sudo systemctl restart sai-cam-portal; then
+        sleep 1
+        if systemctl is-active --quiet sai-cam-portal; then
+            echo "   ✅ sai-cam-portal is running"
+        else
+            echo "   ⚠️  sai-cam-portal was restarted but is not active"
+            echo "      Check logs: sudo journalctl -u sai-cam-portal -n 20"
+        fi
+    else
+        echo "   ❌ Failed to restart sai-cam-portal"
+        echo "      Check logs: sudo journalctl -u sai-cam-portal -n 20"
+        exit 1
+    fi
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    echo ""
+    echo "════════════════════════════════════════════════════════"
+    echo "✅ Portal update complete"
+    echo ""
+    echo "   Updated files:"
+    echo "     • $INSTALL_DIR/status_portal.py"
+    echo "     • $INSTALL_DIR/portal/ ($PORTAL_FILE_COUNT files)"
+    echo ""
+    echo "   Services restarted:"
+    echo "     • sai-cam-portal  ✅"
+    echo "     • sai-cam         (not touched)"
+    echo "     • nginx           (not touched)"
+    echo ""
+    echo "   Access portal: http://$(hostname -I 2>/dev/null | awk '{print $1}')/"
+    echo "════════════════════════════════════════════════════════"
+    exit 0
 fi
 
 echo "🚀 SAI-CAM Installation Script"
