@@ -157,23 +157,40 @@ const BLOCKS = {
               ${cam.online ? '●' : '○'}
             </span>
           </div>
-          <div class="camera-type">${cam.type.toUpperCase()}</div>
-          ${cam.position ? `<div class="camera-position">${cam.position}</div>` : ''}
-          ${cam.online ? `
+          <div class="camera-meta">
+            <span class="camera-type">${cam.type.toUpperCase()}</span>
+            <span class="camera-address-inline">${cam.address}</span>
+          </div>
+          ${cam.position !== undefined ? `
+            <div class="camera-position-row">
+              <span>📍 ${cam.position || 'not set'}</span>
+              <button class="btn-icon" onclick="editCameraPosition('${cam.id}', '${cam.position || ''}')" title="Edit position">✏</button>
+            </div>
+          ` : ''}
+          <div class="camera-thumbnail-area">
             ${cam.latest_image ? `
               <div class="camera-thumbnail" onclick="openImageModal('${cam.id}', '${cam.id} - ${cam.position || ''}')" title="Click to enlarge">
                 <img src="/api/images/${cam.id}/latest?t=${Date.now()}" alt="${cam.id}" loading="lazy" />
                 <div class="thumbnail-overlay"><span>🔍</span></div>
               </div>
-            ` : '<div class="camera-no-image">No images captured yet</div>'}
-            <div class="camera-info">
-              <small data-camera-last-capture>Last: ${cam.last_capture || 'N/A'}</small>
-              <small>Interval: ${cam.capture_interval}s</small>
-            </div>
-          ` : `
-            <div class="camera-error">${cam.error || 'Disconnected'}</div>
-            <div class="camera-address"><small>${cam.address}</small></div>
-          `}
+            ` : cam.online ? `
+              <div class="camera-no-image">No images captured yet</div>
+            ` : `
+              <div class="camera-error">${cam.error || 'Disconnected'}</div>
+            `}
+          </div>
+          <div class="camera-info">
+            <small data-camera-last-capture>Last: ${cam.last_capture || 'N/A'}</small>
+            <small>Interval: ${cam.capture_interval}s</small>
+          </div>
+          <div class="camera-actions">
+            <button class="btn-cam" onclick="forceCapture('${cam.id}')" ${!cam.online ? 'disabled' : ''} title="Force capture now">
+              📸 Capture
+            </button>
+            <button class="btn-cam btn-cam-secondary" onclick="restartCamera('${cam.id}')" title="Restart camera">
+              ↻
+            </button>
+          </div>
         </div>
       `).join('');
 
@@ -256,7 +273,7 @@ const BLOCKS = {
               <span class="interface-name">${name}</span>
               ${isWan ? '<span class="interface-badge wan">WAN</span>' : ''}
             </div>
-            <div class="interface-ip">${iface.ip}</div>
+            <div class="interface-ip">${(iface.ips || [iface.ip]).join('</div><div class="interface-ip">')}</div>
             <div class="interface-type">${iface.type}</div>
           </div>
         `;
@@ -476,7 +493,7 @@ async function renderDashboard(forceFullRender = false) {
   }
 
   // Update header
-  document.getElementById('node-id').textContent = `Node: ${status.node.id}`;
+  document.getElementById('node-id').innerHTML = `<strong>Node:</strong> ${status.node.id}`;
   document.getElementById('node-location').textContent = status.node.location;
   document.getElementById('version').textContent = status.node.version;
   document.getElementById('update-time').textContent = new Date().toLocaleTimeString();
@@ -796,6 +813,59 @@ function showNotification(message, type = 'info') {
       notification.remove();
     }, 300);
   }, 4000);
+}
+
+// ========================================
+// Camera Action Functions
+// ========================================
+
+async function forceCapture(cameraId) {
+  try {
+    const response = await fetch(`/api/cameras/${cameraId}/capture`, { method: 'POST' });
+    const result = await response.json();
+    if (result.ok) {
+      showNotification(`Capture triggered for ${cameraId}`, 'success');
+    } else {
+      showNotification(result.error || 'Failed', 'error');
+    }
+  } catch (e) {
+    showNotification('Service unavailable', 'error');
+  }
+}
+
+async function restartCamera(cameraId) {
+  if (!confirm(`Restart camera ${cameraId}?`)) return;
+  try {
+    const response = await fetch(`/api/cameras/${cameraId}/restart`, { method: 'POST' });
+    const result = await response.json();
+    showNotification(
+      result.ok ? `${cameraId} restarting...` : (result.error || 'Failed'),
+      result.ok ? 'success' : 'error'
+    );
+  } catch (e) {
+    showNotification('Service unavailable', 'error');
+  }
+}
+
+async function editCameraPosition(cameraId, currentPosition) {
+  const position = prompt('Camera position/orientation:', currentPosition);
+  if (position === null) return;  // cancelled
+  try {
+    const response = await fetch(`/api/cameras/${cameraId}/position`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ position })
+    });
+    const result = await response.json();
+    if (result.ok) {
+      showNotification(`Position updated for ${cameraId}`, 'success');
+      manualRefresh();
+    } else {
+      showNotification(result.error || 'Failed', 'error');
+    }
+  } catch (e) {
+    showNotification('Service unavailable', 'error');
+  }
 }
 
 // ========================================

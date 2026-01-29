@@ -10,7 +10,7 @@ import yaml
 import signal
 import argparse
 from datetime import datetime
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 from queue import Queue
 import ssl
 import shutil
@@ -35,7 +35,7 @@ for _path in [_current_dir, _parent_dir]:
 # Import logging utilities
 from logging_utils import RateLimitedLogger, CameraStateTracker
 
-VERSION = "0.2.4"  # Fix codec auto-detection, enhance capture logging
+VERSION = "0.2.5"  # Portal UI fixes: card hover, multi-IP, CSS cleanup
 
 # Force FFMPEG to use TCP transport for all RTSP connections
 # Let codec auto-detect - cameras may use H.264 or H.265
@@ -52,6 +52,7 @@ class CameraInstance:
         self.storage_manager = storage_manager
         self.upload_queue = upload_queue
         self.running = True
+        self.force_capture_event = Event()
 
         # Get capture interval for this camera
         self.capture_interval = self.config.get('capture_interval', 300)
@@ -110,8 +111,12 @@ class CameraInstance:
                     time.sleep(polling_interval)
                     continue
 
-                # Check if it's time for scheduled capture
-                if current_time - self.timestamp_last_image < self.capture_interval:
+                # Check for forced capture or scheduled capture
+                if self.force_capture_event.is_set():
+                    self.force_capture_event.clear()
+                    self.logger.info(f"Camera {self.camera_id}: Force capture triggered")
+                    # Fall through to capture
+                elif current_time - self.timestamp_last_image < self.capture_interval:
                     # For RTSP cameras, grab frames to keep stream alive
                     if self.camera_type == 'rtsp' and hasattr(self.camera, 'grab_frame'):
                         self.camera.grab_frame()
@@ -755,8 +760,23 @@ class CameraService:
             try:
                 conn, _ = server.accept()
                 try:
-                    health_data = self._get_health_data()
-                    response = json.dumps(health_data)
+                    # Try to read a command from the client
+                    conn.settimeout(0.5)
+                    try:
+                        request_data = conn.recv(4096).decode('utf-8').strip()
+                    except sock.timeout:
+                        request_data = ''
+
+                    if not request_data:
+                        # Backward compat: return health data
+                        response = json.dumps(self._get_health_data())
+                    else:
+                        try:
+                            cmd = json.loads(request_data)
+                            response = json.dumps(self._handle_command(cmd))
+                        except Exception as e:
+                            response = json.dumps({'error': str(e)})
+
                     conn.sendall(response.encode('utf-8'))
                 finally:
                     conn.close()
@@ -825,15 +845,71 @@ class CameraService:
             },
         }
 
+    def _handle_command(self, cmd):
+        """Handle a command received via the health socket IPC"""
+        action = cmd.get('action')
+        cam_id = cmd.get('camera_id')
+
+        if action == 'health':
+            return self._get_health_data()
+
+        elif action == 'force_capture':
+            if cam_id not in self.camera_instances:
+                return {'error': f'Camera {cam_id} not found'}
+            instance = self.camera_instances[cam_id]
+            instance.force_capture_event.set()
+            return {'ok': True, 'camera_id': cam_id}
+
+        elif action == 'restart_camera':
+            return self._restart_camera(cam_id)
+
+        else:
+            return {'error': f'Unknown action: {action}'}
+
+    def _restart_camera(self, cam_id):
+        """Restart a specific camera by stopping and re-initializing it"""
+        if cam_id not in self.camera_instances:
+            # Check failed_cameras too
+            if cam_id in self.failed_cameras:
+                # Force immediate retry by resetting next_retry time
+                config, attempts, _ = self.failed_cameras[cam_id]
+                self.failed_cameras[cam_id] = (config, 0, 0)
+                return {'ok': True, 'camera_id': cam_id, 'action': 'retry_queued'}
+            return {'error': f'Camera {cam_id} not found'}
+
+        instance = self.camera_instances[cam_id]
+        instance.stop()
+
+        # Wait for thread to finish
+        thread = self.camera_threads.get(cam_id)
+        if thread and thread.is_alive():
+            thread.join(timeout=5)
+
+        # Re-initialize
+        cam_config = instance.config
+        del self.camera_instances[cam_id]
+        if cam_id in self.camera_threads:
+            del self.camera_threads[cam_id]
+
+        if self._try_initialize_camera(cam_id, cam_config, is_retry=True):
+            new_instance = self.camera_instances[cam_id]
+            t = Thread(target=new_instance.capture_images, name=f"Camera-{cam_id}")
+            t.daemon = True
+            t.start()
+            self.camera_threads[cam_id] = t
+            return {'ok': True, 'camera_id': cam_id, 'action': 'restarted'}
+        else:
+            return {'ok': False, 'camera_id': cam_id, 'action': 'restart_failed'}
+
     def cleanup(self):
         """Clean up resources"""
         self.running = False
-        
+
         # Stop all camera instances
         for cam_id, instance in self.camera_instances.items():
             self.logger.info(f"Stopping camera {cam_id}")
             instance.stop()
-            
+
         self.logger.info("Service stopped")
         sys.exit(0)
 

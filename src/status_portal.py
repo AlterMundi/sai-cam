@@ -267,15 +267,15 @@ def get_network_info():
             if iface_name.startswith('br-') or iface_name.startswith('veth'):
                 continue
 
-            ipv4 = None
+            ipv4_addrs = []
             for addr in iface_addrs:
                 if addr.family == 2:  # AF_INET (IPv4)
-                    ipv4 = addr.address
-                    break
+                    ipv4_addrs.append(addr.address)
 
-            if ipv4:
+            if ipv4_addrs:
                 interfaces[iface_name] = {
-                    'ip': ipv4,
+                    'ip': ipv4_addrs[0],
+                    'ips': ipv4_addrs,
                     'type': 'wireless' if iface_name.startswith('wl') else 'ethernet'
                 }
 
@@ -658,6 +658,76 @@ def query_health_socket():
         return None
 
 
+def send_camera_command(action, camera_id=None):
+    """Send command to camera service via health socket"""
+    socket_path = '/run/sai-cam/health.sock'
+    if not os.path.exists(socket_path):
+        return None
+    try:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(10.0)  # longer timeout for restart ops
+        client.connect(socket_path)
+        cmd = json.dumps({'action': action, 'camera_id': camera_id})
+        client.sendall(cmd.encode('utf-8'))
+        data = b''
+        while True:
+            chunk = client.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        client.close()
+        return json.loads(data.decode('utf-8'))
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@app.route('/api/cameras/<camera_id>/capture', methods=['POST'])
+def api_force_capture(camera_id):
+    """Trigger immediate capture on a specific camera"""
+    result = send_camera_command('force_capture', camera_id)
+    if result is None:
+        return jsonify({'error': 'Camera service not available'}), 503
+    return jsonify(result)
+
+
+@app.route('/api/cameras/<camera_id>/restart', methods=['POST'])
+def api_restart_camera(camera_id):
+    """Restart a specific camera"""
+    result = send_camera_command('restart_camera', camera_id)
+    if result is None:
+        return jsonify({'error': 'Camera service not available'}), 503
+    return jsonify(result)
+
+
+@app.route('/api/cameras/<camera_id>/position', methods=['POST'])
+def api_update_position(camera_id):
+    """Update camera position in config file"""
+    position = request.json.get('position', '')
+    config_path = app.config.get('CONFIG_PATH', '/etc/sai-cam/config.yaml')
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        found = False
+        for cam in cfg.get('cameras', []):
+            if cam['id'] == camera_id:
+                cam['position'] = position
+                found = True
+                break
+        if not found:
+            return jsonify({'error': 'Camera not found in config'}), 404
+        with open(config_path, 'w') as f:
+            yaml.dump(cfg, f, default_flow_style=False)
+        # Update in-memory config too
+        for cam in config.get('cameras', []):
+            if cam['id'] == camera_id:
+                cam['position'] = position
+        return jsonify({'ok': True})
+    except PermissionError:
+        return jsonify({'error': 'Permission denied writing config'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/health')
 def api_health():
     """Get direct health metrics from camera service (not log-based)"""
@@ -840,6 +910,7 @@ def main():
 
     setup_logging()
     load_config(args.config)
+    app.config['CONFIG_PATH'] = args.config
 
     logger.info(f"Starting SAI-Cam Status Portal v{VERSION}")
     logger.info(f"Node: {config.get('device', {}).get('id', 'unknown')}")

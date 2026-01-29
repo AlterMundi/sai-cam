@@ -129,6 +129,19 @@ header {
   font-weight: 500;
 }
 
+#node-id {
+  font-weight: 600;
+  font-size: 0.95em;
+}
+
+#node-id strong {
+  color: var(--sai-text-secondary);
+  font-weight: 400;
+  text-transform: uppercase;
+  font-size: 0.8em;
+  letter-spacing: 0.5px;
+}
+
 #network-info {
   display: flex;
   gap: 8px;
@@ -196,7 +209,6 @@ main {
 .block:hover {
   border-color: var(--card-border-hover);
   box-shadow: var(--card-glow-hover);
-  transform: translateY(-2px);
 }
 
 .block.wide {
@@ -448,9 +460,6 @@ main {
   overflow: hidden;
   margin-bottom: 8px;
   border: 1px solid rgba(13, 148, 136, 0.2);
-}
-
-.camera-thumbnail {
   cursor: pointer;
   position: relative;
 }
@@ -611,6 +620,81 @@ main {
   text-align: center;
   margin-top: 4px;
   font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
+}
+
+/* Camera card meta row (type + address) */
+.camera-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.camera-address-inline {
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.7em;
+  color: var(--sai-text-muted);
+}
+
+/* Position row with edit button */
+.camera-position-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75em;
+  color: var(--sai-text-secondary);
+  margin-bottom: 8px;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9em;
+  padding: 2px 4px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.btn-icon:hover {
+  opacity: 1;
+}
+
+/* Camera action buttons */
+.camera-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--card-border);
+}
+
+.btn-cam {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 0.7em;
+  font-weight: 600;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: rgba(13, 148, 136, 0.1);
+  color: var(--sai-text);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cam:hover:not(:disabled) {
+  border-color: var(--sai-teal);
+  background: rgba(13, 148, 136, 0.2);
+}
+
+.btn-cam:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.btn-cam-secondary {
+  flex: 0 0 auto;
+  padding: 5px 10px;
 }
 
 /* Badge */
