@@ -74,7 +74,8 @@ const BLOCKS = {
             </div>
             ${tempGauge}
           </div>
-          <div class="uptime">Uptime: ${formatUptime(sys.uptime)}</div>
+          <div class="uptime">Uptime: ${formatUptime(sys.system_uptime)}</div>
+          <div class="uptime service-uptime">Service: ${formatUptime(sys.service_uptime)}</div>
         </div>
       `;
     }

@@ -154,7 +154,8 @@ def get_system_info():
             'disk_used_gb': round(disk.used / 1024 / 1024 / 1024, 2),
             'disk_total_gb': round(disk.total / 1024 / 1024 / 1024, 2),
             'temperature': round(temperature, 1) if temperature else None,
-            'uptime': int(time.time() - start_time)
+            'system_uptime': int(time.time() - psutil.boot_time()),
+            'service_uptime': int(time.time() - start_time)
         }
     except Exception as e:
         logger.error(f"Error getting system info: {e}")
