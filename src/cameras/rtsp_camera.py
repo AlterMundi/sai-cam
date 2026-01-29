@@ -73,9 +73,24 @@ class RTSPCamera(BaseCamera):
                 actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
-                
-                self.logger.info(f"Camera {self.camera_id}: RTSP initialized successfully: {actual_width}x{actual_height} @ {actual_fps:.1f}fps")
-                
+
+                # Validate connection with a test frame read
+                # isOpened() can return True before auth completes
+                ret, test_frame = self.cap.read()
+                if not ret or test_frame is None:
+                    self.logger.error(
+                        f"Camera {self.camera_id}: RTSP stream opened but test frame failed "
+                        f"(likely auth rejected or codec unsupported)"
+                    )
+                    self.cap.release()
+                    self.cap = None
+                    return False
+
+                self.logger.info(
+                    f"Camera {self.camera_id}: RTSP initialized and validated: "
+                    f"{actual_width}x{actual_height} @ {actual_fps:.1f}fps"
+                )
+
                 self.is_connected = True
                 self.reset_reconnect_attempts()
                 return True
@@ -93,20 +108,20 @@ class RTSPCamera(BaseCamera):
         try:
             with self.lock:
                 if not self.cap or not self.cap.isOpened():
-                    self.logger.debug(f"Camera {self.camera_id}: RTSP stream not available")
+                    self.logger.warning(f"Camera {self.camera_id}: RTSP stream closed unexpectedly")
+                    self.is_connected = False
                     return None
 
-                self.logger.debug(f"Camera {self.camera_id}: Capturing RTSP frame")
                 ret, frame = self.cap.read()
 
                 if not ret or frame is None:
-                    self.logger.debug(f"Camera {self.camera_id}: Failed to read RTSP frame")
+                    self.logger.warning(f"Camera {self.camera_id}: Frame read failed (stream may have dropped)")
                     return None
 
                 return frame
 
         except Exception as e:
-            self.logger.debug(f"Camera {self.camera_id}: RTSP capture error: {str(e)}")
+            self.logger.warning(f"Camera {self.camera_id}: RTSP capture error: {str(e)}")
             return None
     
     def grab_frame(self) -> bool:

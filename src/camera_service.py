@@ -35,14 +35,11 @@ for _path in [_current_dir, _parent_dir]:
 # Import logging utilities
 from logging_utils import RateLimitedLogger, CameraStateTracker
 
-VERSION = "0.2.3"  # Portal performance and security fixes
+VERSION = "0.2.4"  # Fix codec auto-detection, enhance capture logging
 
 # Force FFMPEG to use TCP transport for all RTSP connections
-# Default: H.264 for broad compatibility (EZViz cameras, Raspberry Pi 3B)
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h264|pixel_format;yuv420p"
-
-# Alternative for cameras with H.265 support and systems with hardware acceleration:
-# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128|pixel_format;yuv420p"
+# Let codec auto-detect - cameras may use H.264 or H.265
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 class CameraInstance:
     """Represents a single camera instance with its own configuration and state"""

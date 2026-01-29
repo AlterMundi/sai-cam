@@ -32,7 +32,7 @@ if parent_dir not in sys.path:
 try:
     from camera_service import VERSION
 except ImportError:
-    VERSION = "0.2.3"  # Fallback if import fails
+    VERSION = "0.2.4"  # Fallback if import fails
 
 app = Flask(__name__, static_folder='portal', static_url_path='')
 
