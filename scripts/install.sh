@@ -1358,18 +1358,37 @@ if [ "$INSTALL_MONITORING" = true ]; then
         # Read config values for vmagent
         NODE_ID=$(read_config_value "device.id" "unknown")
 
-        # Read remote_write_url from config.yaml (metrics.remote_write_url)
+        # Read metrics config from config.yaml
         REMOTE_WRITE_URL=$(python3 -c "
 import yaml, sys
 try:
     with open('$PROJECT_ROOT/config/config.yaml') as f:
         c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_url', 'http://netmaker.altermundi.net:8428/api/v1/write'))
+    print(c.get('metrics', {}).get('remote_write_url', 'https://netmaker.altermundi.net/vmwrite'))
 except Exception:
-    print('http://netmaker.altermundi.net:8428/api/v1/write')
+    print('https://netmaker.altermundi.net/vmwrite')
 " 2>/dev/null)
-        # Fallback if python fails
-        REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"http://netmaker.altermundi.net:8428/api/v1/write"}
+        REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://netmaker.altermundi.net/vmwrite"}
+
+        REMOTE_WRITE_USER=$(python3 -c "
+import yaml, sys
+try:
+    with open('$PROJECT_ROOT/config/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_user', ''))
+except Exception:
+    print('')
+" 2>/dev/null)
+
+        REMOTE_WRITE_PASSWORD=$(python3 -c "
+import yaml, sys
+try:
+    with open('$PROJECT_ROOT/config/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_password', ''))
+except Exception:
+    print('')
+" 2>/dev/null)
 
         echo "🔧 Configuring vmagent..."
         echo "   Node ID:          $NODE_ID"
@@ -1389,7 +1408,7 @@ except Exception:
         echo "   ✅ Auth env: /etc/sai-cam/vmagent-auth.env"
 
         # Generate systemd service from template
-        export REMOTE_WRITE_URL
+        export REMOTE_WRITE_URL REMOTE_WRITE_USER REMOTE_WRITE_PASSWORD
         envsubst < "$PROJECT_ROOT/systemd/vmagent.service.template" | sudo tee /etc/systemd/system/vmagent.service > /dev/null
         echo "   ✅ Service: /etc/systemd/system/vmagent.service"
 
