@@ -630,14 +630,19 @@ if [ "$PORTAL_ONLY" = true ]; then
     echo "   status_portal.py → $INSTALL_DIR/status_portal.py"
     sudo cp "$PROJECT_ROOT/src/status_portal.py" "$INSTALL_DIR/status_portal.py"
 
+    echo "   update_manager.py → $INSTALL_DIR/update_manager.py"
+    sudo cp "$PROJECT_ROOT/src/update_manager.py" "$INSTALL_DIR/update_manager.py"
+
     echo "   src/portal/* → $INSTALL_DIR/portal/"
     sudo cp -r "$PROJECT_ROOT/src/portal/"* "$INSTALL_DIR/portal/"
 
     # ── Set ownership and permissions ────────────────────────────────────────
     echo "🔐 Setting ownership and permissions..."
     sudo chown "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/status_portal.py"
+    sudo chown "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/update_manager.py"
     sudo chown -R "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/portal"
     sudo chmod 755 "$INSTALL_DIR/status_portal.py"
+    sudo chmod 644 "$INSTALL_DIR/update_manager.py"
     sudo find "$INSTALL_DIR/portal" -type f -exec chmod 644 {} \;
     sudo find "$INSTALL_DIR/portal" -type d -exec chmod 755 {} \;
     echo "   ✅ Ownership: $SYSTEM_USER:$SYSTEM_GROUP"
@@ -896,6 +901,7 @@ echo "📦 Installing camera modules..."
 sudo cp -r $PROJECT_ROOT/src/cameras $INSTALL_DIR/
 sudo cp $PROJECT_ROOT/src/config_helper.py $INSTALL_DIR/
 sudo cp $PROJECT_ROOT/src/logging_utils.py $INSTALL_DIR/
+sudo cp $PROJECT_ROOT/src/update_manager.py $INSTALL_DIR/
 
 # Copy status portal
 echo "🌐 Installing status portal..."
@@ -1098,6 +1104,7 @@ sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
 sudo find $INSTALL_DIR/cameras -name "*.py" -exec chmod 644 {} \;
 sudo chmod 644 $INSTALL_DIR/config_helper.py
 sudo chmod 644 $INSTALL_DIR/logging_utils.py
+sudo chmod 644 $INSTALL_DIR/update_manager.py
 
 # Set permissions for status portal
 sudo chmod 755 $INSTALL_DIR/status_portal.py
