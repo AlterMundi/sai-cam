@@ -1,0 +1,11 @@
+[Unit]
+Description=SAI-Cam Self-Update Check Timer
+
+[Timer]
+OnBootSec=300
+OnUnitActiveSec=6h
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

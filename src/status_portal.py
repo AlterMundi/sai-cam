@@ -41,6 +41,13 @@ try:
 except ImportError:
     VERSION = "0.2.4"  # Fallback if import fails
 
+# Import update manager for self-update state
+try:
+    from update_manager import get_update_info
+    UPDATE_MANAGER_AVAILABLE = True
+except ImportError:
+    UPDATE_MANAGER_AVAILABLE = False
+
 app = Flask(__name__, static_folder='portal', static_url_path='')
 
 # Global state
@@ -85,6 +92,11 @@ if PROMETHEUS_AVAILABLE:
 
     # Network
     saicam_upstream_online = Gauge('saicam_upstream_online', 'Upstream internet connectivity (1/0)')
+
+    # Self-update
+    saicam_update_available = Gauge('saicam_update_available', 'Whether a newer version is available (1/0)')
+    saicam_update_last_check_timestamp = Gauge('saicam_update_last_check_timestamp', 'Unix timestamp of last update check')
+    saicam_update_consecutive_failures = Gauge('saicam_update_consecutive_failures', 'Number of consecutive update failures')
 
 def load_config(config_path='/etc/sai-cam/config.yaml'):
     """Load configuration from YAML file"""
@@ -440,12 +452,20 @@ def api_status():
             'cameras': get_camera_status() if features['cameras'] else [],
             'storage': get_storage_info() if features['storage'] else None,
             'network': get_network_info(),
-            'wifi_ap': get_wifi_ap_info() if features['wifi_ap'] else None
+            'wifi_ap': get_wifi_ap_info() if features['wifi_ap'] else None,
+            'update': get_update_info() if UPDATE_MANAGER_AVAILABLE else None
         },
         'timestamp': datetime.now().isoformat()
     }
 
     return jsonify(data)
+
+@app.route('/api/update/status')
+def api_update_status():
+    """Get self-update system status"""
+    if not UPDATE_MANAGER_AVAILABLE:
+        return jsonify({'error': 'update_manager not available'}), 501
+    return jsonify(get_update_info())
 
 @app.route('/api/status/cameras')
 def api_cameras():
@@ -1033,6 +1053,23 @@ def _update_prometheus_metrics():
     net_info = get_network_info()
     if net_info:
         saicam_upstream_online.set(1 if net_info.get('upstream_online', False) else 0)
+
+    # Self-update
+    if UPDATE_MANAGER_AVAILABLE:
+        try:
+            update_info = get_update_info()
+            saicam_update_available.set(1 if update_info.get('update_available') else 0)
+            saicam_update_consecutive_failures.set(update_info.get('consecutive_failures', 0))
+            last_check = update_info.get('last_check', '')
+            if last_check:
+                try:
+                    from datetime import datetime as dt
+                    ts = dt.fromisoformat(last_check).timestamp()
+                    saicam_update_last_check_timestamp.set(ts)
+                except (ValueError, TypeError):
+                    pass
+        except Exception:
+            pass
 
 
 @app.route('/metrics')

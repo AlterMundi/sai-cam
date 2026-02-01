@@ -1184,6 +1184,17 @@ echo "⚙️  Enabling services..."
 sudo systemctl enable sai-cam
 sudo systemctl enable sai-cam-portal
 
+# Install and enable self-update timer
+echo "🔄 Installing self-update timer..."
+envsubst < "$PROJECT_ROOT/systemd/sai-cam-update.service.template" | \
+    sudo tee /etc/systemd/system/sai-cam-update.service > /dev/null
+sudo cp "$PROJECT_ROOT/systemd/sai-cam-update.timer.template" \
+    /etc/systemd/system/sai-cam-update.timer
+sudo systemctl daemon-reload
+sudo systemctl enable sai-cam-update.timer
+sudo systemctl start sai-cam-update.timer
+echo "   ✅ Update timer: every 6h with 30min jitter"
+
 echo "📹 Starting sai-cam service..."
 # Check if service is already running and restart it to apply new code
 if systemctl is-active --quiet sai-cam; then
@@ -1233,6 +1244,20 @@ if [ -d "$PROJECT_ROOT/system/monitoring" ]; then
     sudo cp -r $PROJECT_ROOT/system/monitoring/* $INSTALL_DIR/system/monitoring/
     sudo cp -r $PROJECT_ROOT/system/config/* $INSTALL_DIR/system/config/
     sudo chmod +x $INSTALL_DIR/system/monitoring/*.sh
+fi
+
+# Install self-update system
+echo "🔄 Installing self-update script..."
+sudo cp "$PROJECT_ROOT/scripts/self-update.sh" "$INSTALL_DIR/system/self-update.sh"
+sudo chmod 755 "$INSTALL_DIR/system/self-update.sh"
+sudo mkdir -p /var/lib/sai-cam
+
+# Clone repo for self-update system (fresh install only)
+if [ ! -d "$INSTALL_DIR/repo/.git" ]; then
+    echo "📦 Cloning repository for self-update system..."
+    sudo git clone --depth 50 https://github.com/AlterMundi/sai-cam.git "$INSTALL_DIR/repo" 2>&1 || {
+        echo "⚠️  Failed to clone repo (self-update will clone on first run)"
+    }
 fi
 
 # Setup cron jobs for monitoring and scheduled maintenance

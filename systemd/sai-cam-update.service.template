@@ -1,0 +1,13 @@
+[Unit]
+Description=SAI-Cam Self-Update
+After=network-online.target sai-cam.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${INSTALL_DIR}/system/self-update.sh
+TimeoutStartSec=600
+User=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sai-cam-update
