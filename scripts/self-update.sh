@@ -160,9 +160,9 @@ RELEASES_JSON=$(curl -sf --max-time "$CURL_TIMEOUT" \
 }
 
 # --- Find latest release for channel ---
-TARGET_TAG=$("$VENV_PYTHON" -c "
+TARGET_TAG=$(echo "$RELEASES_JSON" | "$VENV_PYTHON" -c "
 import json, sys
-releases = json.loads('''$RELEASES_JSON''')
+releases = json.load(sys.stdin)
 channel = '$CHANNEL'
 for r in releases:
     if r.get('draft', False):
@@ -172,7 +172,6 @@ for r in releases:
         continue
     if channel == 'stable' and r.get('prerelease', False):
         continue
-    # Strip leading 'v' for version comparison
     print(tag)
     break
 " 2>/dev/null) || {
@@ -336,9 +335,9 @@ while [ "$ELAPSED" -lt "$HEALTH_TIMEOUT" ]; do
     }
 
     # Check reported version matches target
-    REPORTED_VERSION=$("$VENV_PYTHON" -c "
+    REPORTED_VERSION=$(echo "$PORTAL_RESPONSE" | "$VENV_PYTHON" -c "
 import json, sys
-d = json.loads('''$PORTAL_RESPONSE''')
+d = json.load(sys.stdin)
 print(d.get('node', {}).get('version', ''))
 " 2>/dev/null || echo "")
 
