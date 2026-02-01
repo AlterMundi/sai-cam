@@ -65,9 +65,9 @@ write_state() {
         local val="${arg#*=}"
         # Numbers: consecutive_failures
         if [[ "$key" == "consecutive_failures" ]]; then
-            py_args+="    d['$key'] = $val"$'\n'
+            py_args+="d['$key'] = $val; "
         else
-            py_args+="    d['$key'] = '$val'"$'\n'
+            py_args+="d['$key'] = '$val'; "
         fi
     done
 
