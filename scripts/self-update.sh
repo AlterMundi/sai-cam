@@ -90,8 +90,8 @@ os.rename(tmp, path)
 }
 
 get_current_version() {
-    # Read VERSION from deployed camera_service.py
-    local version_file="$INSTALL_DIR/bin/camera_service.py"
+    # Read VERSION from deployed version.py (single source of truth)
+    local version_file="$INSTALL_DIR/src/version.py"
     if [ -f "$version_file" ]; then
         grep -oP 'VERSION\s*=\s*"?\K[0-9]+\.[0-9]+\.[0-9]+[^"]*' "$version_file" 2>/dev/null || echo "0.0.0"
     else
@@ -263,7 +263,7 @@ done
 
 # Verify VERSION in new code matches tag
 NEW_VERSION=$(grep -oP 'VERSION\s*=\s*"?\K[0-9]+\.[0-9]+\.[0-9]+[^"]*' \
-    "$REPO_DIR/src/camera_service.py" 2>/dev/null || echo "")
+    "$REPO_DIR/src/version.py" 2>/dev/null || echo "")
 if [ "$NEW_VERSION" != "$TARGET_VERSION" ]; then
     log_err "Pre-update check FAILED: VERSION in code ($NEW_VERSION) != tag ($TARGET_VERSION)"
     PREFLIGHT_PASS=false

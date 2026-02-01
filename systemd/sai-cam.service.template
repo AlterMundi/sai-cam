@@ -8,9 +8,9 @@ StartLimitBurst=5
 Type=notify
 User=${SYSTEM_USER}
 Group=${SYSTEM_GROUP}
-WorkingDirectory=${INSTALL_DIR}
-Environment=PYTHONPATH=${INSTALL_DIR}
-ExecStart=${INSTALL_DIR}/venv/bin/python3 ${INSTALL_DIR}/bin/camera_service.py
+WorkingDirectory=${INSTALL_DIR}/src
+Environment=PYTHONPATH=${INSTALL_DIR}/src
+ExecStart=${INSTALL_DIR}/venv/bin/python3 ${INSTALL_DIR}/src/camera_service.py
 Restart=always
 RestartSec=10
 

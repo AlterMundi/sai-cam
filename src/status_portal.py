@@ -29,17 +29,13 @@ try:
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
-# Add parent directory to path for imports
-current_dir = os.path.dirname(__file__)
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# Add current directory to path for imports (all Python files are in src/)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
-# Import version from camera_service to keep in sync
-try:
-    from camera_service import VERSION
-except ImportError:
-    VERSION = "0.2.4"  # Fallback if import fails
+# Import version - fail loudly if not found
+from version import VERSION
 
 # Import update manager for self-update state
 try:

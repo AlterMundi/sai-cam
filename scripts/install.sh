@@ -560,14 +560,14 @@ if [ "$PORTAL_ONLY" = true ]; then
         echo "   ✅ Installation directory exists: $INSTALL_DIR"
     fi
 
-    # 2. Verify portal directory exists in installation
-    if [ ! -d "$INSTALL_DIR/portal" ]; then
-        echo "   ❌ Portal directory not found: $INSTALL_DIR/portal/"
+    # 2. Verify src directory exists in installation
+    if [ ! -d "$INSTALL_DIR/src" ]; then
+        echo "   ❌ Source directory not found: $INSTALL_DIR/src/"
         echo "      SAI-CAM must be fully installed before using --portal."
         echo "      Run: sudo ./install.sh"
         PREFLIGHT_FAILED=true
     else
-        echo "   ✅ Portal directory exists: $INSTALL_DIR/portal/"
+        echo "   ✅ Source directory exists: $INSTALL_DIR/src/"
     fi
 
     # 3. Verify the portal systemd service is registered
@@ -627,24 +627,25 @@ if [ "$PORTAL_ONLY" = true ]; then
     # ── Copy portal files ────────────────────────────────────────────────────
     echo "📄 Copying portal files..."
 
-    echo "   status_portal.py → $INSTALL_DIR/status_portal.py"
-    sudo cp "$PROJECT_ROOT/src/status_portal.py" "$INSTALL_DIR/status_portal.py"
+    echo "   status_portal.py → $INSTALL_DIR/src/status_portal.py"
+    sudo cp "$PROJECT_ROOT/src/status_portal.py" "$INSTALL_DIR/src/status_portal.py"
 
-    echo "   update_manager.py → $INSTALL_DIR/update_manager.py"
-    sudo cp "$PROJECT_ROOT/src/update_manager.py" "$INSTALL_DIR/update_manager.py"
+    echo "   update_manager.py → $INSTALL_DIR/src/update_manager.py"
+    sudo cp "$PROJECT_ROOT/src/update_manager.py" "$INSTALL_DIR/src/update_manager.py"
 
-    echo "   src/portal/* → $INSTALL_DIR/portal/"
-    sudo cp -r "$PROJECT_ROOT/src/portal/"* "$INSTALL_DIR/portal/"
+    echo "   src/portal/* → $INSTALL_DIR/src/portal/"
+    sudo mkdir -p "$INSTALL_DIR/src/portal"
+    sudo cp -r "$PROJECT_ROOT/src/portal/"* "$INSTALL_DIR/src/portal/"
 
     # ── Set ownership and permissions ────────────────────────────────────────
     echo "🔐 Setting ownership and permissions..."
-    sudo chown "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/status_portal.py"
-    sudo chown "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/update_manager.py"
-    sudo chown -R "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/portal"
-    sudo chmod 755 "$INSTALL_DIR/status_portal.py"
-    sudo chmod 644 "$INSTALL_DIR/update_manager.py"
-    sudo find "$INSTALL_DIR/portal" -type f -exec chmod 644 {} \;
-    sudo find "$INSTALL_DIR/portal" -type d -exec chmod 755 {} \;
+    sudo chown "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/src/status_portal.py"
+    sudo chown "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/src/update_manager.py"
+    sudo chown -R "$SYSTEM_USER:$SYSTEM_GROUP" "$INSTALL_DIR/src/portal"
+    sudo chmod 755 "$INSTALL_DIR/src/status_portal.py"
+    sudo chmod 644 "$INSTALL_DIR/src/update_manager.py"
+    sudo find "$INSTALL_DIR/src/portal" -type f -exec chmod 644 {} \;
+    sudo find "$INSTALL_DIR/src/portal" -type d -exec chmod 755 {} \;
     echo "   ✅ Ownership: $SYSTEM_USER:$SYSTEM_GROUP"
     echo "   ✅ Permissions: 755 (portal.py), 644 (assets), 755 (dirs)"
 
@@ -671,8 +672,8 @@ if [ "$PORTAL_ONLY" = true ]; then
     echo "✅ Portal update complete"
     echo ""
     echo "   Updated files:"
-    echo "     • $INSTALL_DIR/status_portal.py"
-    echo "     • $INSTALL_DIR/portal/ ($PORTAL_FILE_COUNT files)"
+    echo "     • $INSTALL_DIR/src/status_portal.py"
+    echo "     • $INSTALL_DIR/src/portal/ ($PORTAL_FILE_COUNT files)"
     echo ""
     echo "   Services restarted:"
     echo "     • sai-cam-portal  ✅"
@@ -892,22 +893,32 @@ fi
 echo ""
 echo "📋 Installing Service Files"
 echo "---------------------------"
-echo "📄 Copying camera service and modules..."
-# Copy main camera service
-sudo cp $PROJECT_ROOT/src/camera_service.py $INSTALL_DIR/bin/
 
-# Copy new modular camera architecture
+# Normalized deployment: all Python code goes to $INSTALL_DIR/src/
+echo "📄 Copying Python source files to $INSTALL_DIR/src/..."
+sudo mkdir -p $INSTALL_DIR/src
+sudo cp $PROJECT_ROOT/src/version.py $INSTALL_DIR/src/
+sudo cp $PROJECT_ROOT/src/camera_service.py $INSTALL_DIR/src/
+sudo cp $PROJECT_ROOT/src/status_portal.py $INSTALL_DIR/src/
+sudo cp $PROJECT_ROOT/src/config_helper.py $INSTALL_DIR/src/
+sudo cp $PROJECT_ROOT/src/logging_utils.py $INSTALL_DIR/src/
+sudo cp $PROJECT_ROOT/src/update_manager.py $INSTALL_DIR/src/
+
+# Copy camera modules
 echo "📦 Installing camera modules..."
-sudo cp -r $PROJECT_ROOT/src/cameras $INSTALL_DIR/
-sudo cp $PROJECT_ROOT/src/config_helper.py $INSTALL_DIR/
-sudo cp $PROJECT_ROOT/src/logging_utils.py $INSTALL_DIR/
-sudo cp $PROJECT_ROOT/src/update_manager.py $INSTALL_DIR/
+sudo cp -r $PROJECT_ROOT/src/cameras $INSTALL_DIR/src/
 
-# Copy status portal
-echo "🌐 Installing status portal..."
-sudo cp $PROJECT_ROOT/src/status_portal.py $INSTALL_DIR/
-sudo mkdir -p $INSTALL_DIR/portal
-sudo cp -r $PROJECT_ROOT/src/portal/* $INSTALL_DIR/portal/
+# Copy portal web assets
+echo "🌐 Installing portal web assets..."
+sudo mkdir -p $INSTALL_DIR/src/portal
+sudo cp -r $PROJECT_ROOT/src/portal/* $INSTALL_DIR/src/portal/
+
+# Legacy compatibility: symlink bin/ -> src/ for any scripts expecting old paths
+if [ ! -L "$INSTALL_DIR/bin" ]; then
+    sudo rm -rf "$INSTALL_DIR/bin" 2>/dev/null || true
+    sudo ln -sf src "$INSTALL_DIR/bin"
+    echo "   Created symlink: bin -> src"
+fi
 
 # Copy environment configuration if it exists
 if [ -f "$PROJECT_ROOT/.env" ]; then
@@ -1098,18 +1109,18 @@ sudo chmod 644 $CONFIG_DIR/config.yaml
 sudo chmod 644 /etc/nginx/sites-available/camera-proxy
 sudo chmod 644 /etc/systemd/system/sai-cam.service
 sudo chmod 644 /etc/logrotate.d/sai-cam
-sudo chmod 755 $INSTALL_DIR/bin/camera_service.py
+# Set permissions for Python source files
+sudo chmod 644 $INSTALL_DIR/src/version.py
+sudo chmod 755 $INSTALL_DIR/src/camera_service.py
+sudo chmod 755 $INSTALL_DIR/src/status_portal.py
+sudo chmod 644 $INSTALL_DIR/src/config_helper.py
+sudo chmod 644 $INSTALL_DIR/src/logging_utils.py
+sudo chmod 644 $INSTALL_DIR/src/update_manager.py
+sudo find $INSTALL_DIR/src/cameras -name "*.py" -exec chmod 644 {} \;
 
-# Set permissions for new camera modules and utilities
-sudo find $INSTALL_DIR/cameras -name "*.py" -exec chmod 644 {} \;
-sudo chmod 644 $INSTALL_DIR/config_helper.py
-sudo chmod 644 $INSTALL_DIR/logging_utils.py
-sudo chmod 644 $INSTALL_DIR/update_manager.py
-
-# Set permissions for status portal
-sudo chmod 755 $INSTALL_DIR/status_portal.py
-sudo find $INSTALL_DIR/portal -type f -exec chmod 644 {} \;
-sudo find $INSTALL_DIR/portal -type d -exec chmod 755 {} \;
+# Set permissions for portal web assets
+sudo find $INSTALL_DIR/src/portal -type f -exec chmod 644 {} \;
+sudo find $INSTALL_DIR/src/portal -type d -exec chmod 755 {} \;
 
 # Secure environment file if it exists
 if [ -f "$INSTALL_DIR/.env" ]; then

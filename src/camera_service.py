@@ -35,7 +35,7 @@ for _path in [_current_dir, _parent_dir]:
 # Import logging utilities
 from logging_utils import RateLimitedLogger, CameraStateTracker
 
-VERSION = "0.2.7"  # Portal SEO + nginx security headers
+from version import VERSION
 
 # Force FFMPEG to use TCP transport for all RTSP connections
 # Let codec auto-detect - cameras may use H.264 or H.265
