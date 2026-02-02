@@ -192,6 +192,10 @@ SYSTEM_PACKAGES="python3-pip python3-opencv python3-venv libsystemd-dev nginx ge
 DEFAULT_USER="admin"
 DEFAULT_GROUP="admin"
 
+# Shared system group for all SAI-Cam components (portal, camera, updater)
+# Enables the portal (admin) and self-update (root) to share state files and logs.
+SAICAM_GROUP="sai-cam"
+
 # Network configuration defaults (can be overridden by config.yaml)
 DEFAULT_NODE_IP="192.168.220.1/24"
 DEFAULT_INTERFACE="eth0"
@@ -793,6 +797,30 @@ else
     echo "   The system will use default network configuration"
 fi
 
+# Create shared system group
+echo ""
+echo "👥 Setting Up System Group"
+echo "--------------------------"
+if getent group "$SAICAM_GROUP" > /dev/null 2>&1; then
+    echo "✅ Group '$SAICAM_GROUP' already exists"
+else
+    sudo groupadd --system "$SAICAM_GROUP"
+    echo "✅ Created system group: $SAICAM_GROUP"
+fi
+# Ensure service user and root are both members
+if ! id -nG "$SYSTEM_USER" 2>/dev/null | grep -qw "$SAICAM_GROUP"; then
+    sudo usermod -aG "$SAICAM_GROUP" "$SYSTEM_USER"
+    echo "✅ Added $SYSTEM_USER to $SAICAM_GROUP group"
+else
+    echo "✅ $SYSTEM_USER already in $SAICAM_GROUP group"
+fi
+if ! id -nG root 2>/dev/null | grep -qw "$SAICAM_GROUP"; then
+    sudo usermod -aG "$SAICAM_GROUP" root
+    echo "✅ Added root to $SAICAM_GROUP group"
+else
+    echo "✅ root already in $SAICAM_GROUP group"
+fi
+
 # Create directories
 echo ""
 echo "📁 Creating System Directories"
@@ -802,7 +830,17 @@ sudo mkdir -p $INSTALL_DIR/bin
 sudo mkdir -p $INSTALL_DIR/storage
 sudo mkdir -p $CONFIG_DIR
 sudo mkdir -p $LOG_DIR
+sudo mkdir -p /var/lib/sai-cam
+
+# Shared directories: setgid so new files inherit the group
+sudo chown root:$SAICAM_GROUP /var/lib/sai-cam
+sudo chmod 2775 /var/lib/sai-cam
+sudo chown root:$SAICAM_GROUP $LOG_DIR
+sudo chmod 2775 $LOG_DIR
+
 echo "✅ Directories created successfully"
+echo "   /var/lib/sai-cam  → root:$SAICAM_GROUP (setgid)"
+echo "   $LOG_DIR → root:$SAICAM_GROUP (setgid)"
 
 # Install system dependencies
 echo ""
@@ -1103,7 +1141,19 @@ echo "🔐 Setting File Permissions"
 echo "---------------------------"
 echo "🔧 Configuring ownership and permissions..."
 sudo chown -R $SYSTEM_USER:$SYSTEM_GROUP $INSTALL_DIR
-sudo chown -R $SYSTEM_USER:$SYSTEM_GROUP $LOG_DIR
+# Shared dirs: owned by root with sai-cam group + setgid
+sudo chown root:$SAICAM_GROUP $LOG_DIR
+sudo chmod 2775 $LOG_DIR
+# Fix ownership of existing log files so portal (admin) can write
+sudo chown $SYSTEM_USER:$SAICAM_GROUP $LOG_DIR/*.log 2>/dev/null || true
+sudo chmod 664 $LOG_DIR/*.log 2>/dev/null || true
+sudo chown root:$SAICAM_GROUP /var/lib/sai-cam
+sudo chmod 2775 /var/lib/sai-cam
+# State file: group-writable so portal can update it
+if [ -f /var/lib/sai-cam/update-state.json ]; then
+    sudo chown root:$SAICAM_GROUP /var/lib/sai-cam/update-state.json
+    sudo chmod 664 /var/lib/sai-cam/update-state.json
+fi
 sudo chown $SYSTEM_USER:$SYSTEM_GROUP $CONFIG_DIR/config.yaml
 sudo chmod 644 $CONFIG_DIR/config.yaml
 sudo chmod 644 /etc/nginx/sites-available/camera-proxy
@@ -1268,7 +1318,6 @@ fi
 echo "🔄 Installing self-update script..."
 sudo cp "$PROJECT_ROOT/scripts/self-update.sh" "$INSTALL_DIR/system/self-update.sh"
 sudo chmod 755 "$INSTALL_DIR/system/self-update.sh"
-sudo mkdir -p /var/lib/sai-cam
 
 # Clone repo for self-update system (fresh install only)
 if [ ! -d "$INSTALL_DIR/repo/.git" ]; then

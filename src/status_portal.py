@@ -39,7 +39,7 @@ from version import VERSION
 
 # Import update manager for self-update state
 try:
-    from update_manager import get_update_info, check_version_newer
+    from update_manager import get_update_info, check_version_newer, write_state
     UPDATE_MANAGER_AVAILABLE = True
 except ImportError:
     UPDATE_MANAGER_AVAILABLE = False
@@ -463,9 +463,10 @@ def api_update_status():
 
 @app.route('/api/update/check', methods=['POST'])
 def api_update_check():
-    """Check GitHub for new releases (read-only, no state file writes).
+    """Check GitHub for new releases, update state file and log.
 
-    Queries GitHub Releases API, compares versions against running VERSION.
+    Queries GitHub Releases API, compares versions against running VERSION,
+    persists result to update-state.json and appends to update.log.
     """
     if not UPDATE_MANAGER_AVAILABLE:
         return jsonify({'error': 'update_manager not available'}), 501
@@ -475,11 +476,14 @@ def api_update_check():
     channel = config.get('updates', {}).get('channel', 'stable')
     github_api = 'https://api.github.com/repos/AlterMundi/sai-cam/releases'
 
+    _update_log('Check triggered from portal')
+
     try:
         resp = http_requests.get(github_api, headers={'Accept': 'application/vnd.github.v3+json'}, timeout=15)
         resp.raise_for_status()
         releases = resp.json()
     except Exception as e:
+        _update_log(f'ERROR: Failed to query GitHub: {e}')
         return jsonify({'error': f'Failed to query GitHub: {e}'}), 502
 
     # Find latest release for channel
@@ -496,21 +500,58 @@ def api_update_check():
         break
 
     if not target_tag:
-        return jsonify({
+        result = {
             'status': 'up_to_date', 'current_version': VERSION,
             'latest_available': VERSION, 'update_available': False, 'channel': channel,
-        })
+        }
+        _update_log(f'No releases found for channel={channel}')
+        _try_write_state(result)
+        return jsonify(result)
 
     target_version = target_tag.lstrip('v')
     update_available = check_version_newer(VERSION, target_version)
 
-    return jsonify({
+    result = {
         'status': 'update_available' if update_available else 'up_to_date',
         'current_version': VERSION,
         'latest_available': target_version,
         'update_available': update_available,
         'channel': channel,
-    })
+    }
+
+    if update_available:
+        _update_log(f'Update available: {VERSION} -> {target_version}')
+    else:
+        _update_log(f'Already up-to-date ({VERSION} >= {target_version})')
+
+    _try_write_state(result)
+    return jsonify(result)
+
+
+def _update_log(msg):
+    """Append a timestamped line to the update log file."""
+    try:
+        log_path = Path('/var/log/sai-cam/update.log')
+        ts = datetime.now().astimezone().isoformat(timespec='seconds')
+        with open(log_path, 'a') as f:
+            f.write(f'[{ts}] {msg}\n')
+    except OSError:
+        logger.debug(f'Could not write to update.log: {msg}')
+
+
+def _try_write_state(result):
+    """Best-effort write of check results to update state file."""
+    try:
+        ts = datetime.now().astimezone().isoformat(timespec='seconds')
+        write_state(
+            last_check=ts,
+            current_version=result['current_version'],
+            latest_available=result['latest_available'],
+            channel=result['channel'],
+            status=result['status'],
+        )
+    except OSError as e:
+        logger.debug(f'Could not write state file: {e}')
 
 @app.route('/api/status/cameras')
 def api_cameras():

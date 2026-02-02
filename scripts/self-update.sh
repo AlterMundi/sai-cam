@@ -19,6 +19,10 @@
 set -euo pipefail
 
 main() {
+    # Allow group writes — shared dirs are setgid sai-cam so both root
+    # (self-update) and admin (portal) can read/write state and logs.
+    umask 002
+
     # --- Configuration ---
     INSTALL_DIR="/opt/sai-cam"
     CONFIG_FILE="/etc/sai-cam/config.yaml"
