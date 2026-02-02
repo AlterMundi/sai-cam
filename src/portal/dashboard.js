@@ -1040,25 +1040,13 @@ function connectEventStream() {
     setTimeout(connectEventStream, 5000);
   };
 
-  eventSource.onopen = async () => {
+  eventSource.onopen = () => {
     console.log('SSE connection established');
     updateConnectionStatus(true);
 
-    // After reconnection, check if server version changed (i.e. an update happened)
+    // Refresh data after reconnection (version-change reload is handled by updateHealthData)
     if (sseWasDisconnected) {
       sseWasDisconnected = false;
-      try {
-        const status = await fetchStatus();
-        const displayedVersion = document.getElementById('version')?.textContent;
-        if (status && displayedVersion && status.node.version !== displayedVersion) {
-          console.log(`Version changed: ${displayedVersion} → ${status.node.version}, reloading page...`);
-          location.reload();
-          return;
-        }
-      } catch (e) {
-        console.warn('Version check failed:', e);
-      }
-      console.log('Reconnected after disconnection, refreshing dashboard...');
       manualRefresh();
     }
   };
@@ -1078,6 +1066,16 @@ function updateConnectionStatus(connected) {
 // Selective update functions for SSE events
 
 function updateHealthData(health) {
+  // Auto-reload if server version changed (e.g. after an update)
+  if (health.portal_version) {
+    const displayedVersion = document.getElementById('version')?.textContent;
+    if (displayedVersion && health.portal_version !== displayedVersion) {
+      console.log(`Server version changed: ${displayedVersion} → ${health.portal_version}, reloading...`);
+      location.reload();
+      return;
+    }
+  }
+
   // Update timestamp
   const timeEl = document.getElementById('update-time');
   if (timeEl) {

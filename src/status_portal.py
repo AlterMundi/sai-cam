@@ -537,6 +537,7 @@ def api_events():
             health = query_health_socket() or {}
             # Add system metrics from psutil
             health['system'] = get_system_info()
+            health['portal_version'] = VERSION
             yield f"event: health\ndata: {json.dumps(health)}\n\n"
             last_health_hash = hash(json.dumps(health, sort_keys=True))
             last_health_time = time.time()
@@ -552,6 +553,7 @@ def api_events():
                     health = query_health_socket() or {}
                     # Add system metrics from psutil
                     health['system'] = get_system_info()
+                    health['portal_version'] = VERSION
                     health_hash = hash(json.dumps(health, sort_keys=True))
                     if health_hash != last_health_hash:
                         yield f"event: health\ndata: {json.dumps(health)}\n\n"
