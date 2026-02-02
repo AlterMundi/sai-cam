@@ -100,37 +100,85 @@ Location: `/var/lib/sai-cam/update-state.json`
 
 ## Release Workflow
 
+### `release.sh` reference
+
+```
+./scripts/release.sh              # patch bump (default): 0.2.22 → 0.2.23
+./scripts/release.sh --minor      # minor bump: 0.2.22 → 0.3.0
+./scripts/release.sh --major      # major bump: 0.2.22 → 1.0.0
+./scripts/release.sh --beta       # beta pre-release: 0.2.22 → 0.2.23-beta.1
+./scripts/release.sh --beta       # next beta: 0.2.23-beta.1 → 0.2.23-beta.2
+./scripts/release.sh --promote    # promote beta to stable: 0.2.23-beta.2 → 0.2.23
+./scripts/release.sh --dry-run    # preview, no changes
+./scripts/release.sh --force-branch  # skip the "must be on main" check
+```
+
+Safety checks before pushing: must be on `main`, clean working tree,
+up-to-date with remote, tag must not already exist.
+
 ### Stable release
 
 ```bash
-./scripts/release.sh              # patch bump, tag, push
+./scripts/release.sh
 # CI creates a GitHub Release (not pre-release)
 # All nodes pick it up on their next 6h check
 ```
 
-### Beta iteration
+### Beta iteration procedure
 
-Beta nodes (`channel: beta`) see pre-releases. Iterate by bumping the
-version each time — every commit that should reach the fleet gets its own tag:
+Beta nodes (`channel: beta` in config.yaml) see pre-releases that stable
+nodes ignore. This is the development iteration loop:
 
 ```bash
-./scripts/release.sh --beta       # 0.2.22 → 0.2.23, tagged, pre-release
-# test on beta node...
-./scripts/release.sh --beta       # 0.2.23 → 0.2.24, tagged, pre-release
-# happy? promote to stable:
-./scripts/release.sh              # 0.2.24 → 0.2.25, tagged, full release
+# 1. Make your changes on main
+git add -A && git commit -m "fix: whatever"
+
+# 2. Release as pre-release (bumps version, tags, pushes, CI creates release)
+./scripts/release.sh --beta
+
+# 3. Trigger update on your beta node (or wait for the 6h timer)
+ssh saicam3.local "sudo /opt/sai-cam/system/self-update.sh --force"
+
+# 4. Test on the node, check portal auto-refreshes to new version
+
+# 5. Found a bug? Fix it, repeat from step 1 — each iteration bumps the version
+./scripts/release.sh --beta       # new version, new tag, new pre-release
+
+# 6. Happy with the result? Promote to stable for the whole fleet
+./scripts/release.sh --promote    # strips pre-release suffix, full release
 ```
 
-> **Tip:** Don't reuse tags. Each iteration is a new version number.
-> Tags are immutable release identifiers — re-tagging the same version
-> creates confusion in the fleet and breaks caching. Semver is cheap;
-> version numbers are free.
+### Setting up a beta node
+
+```bash
+ssh saicam3.local "sudo nano /etc/sai-cam/config.yaml"
+# Add or edit:
+#   updates:
+#     enabled: true
+#     channel: beta
+#     apply_immediately: true
+```
 
 ### Manual check from the portal
 
 The Updates card has a ↻ button that queries GitHub Releases from the
-browser (via `POST /api/update/check`). This is read-only — it shows
+browser (via `POST /api/update/check`). This is read-only — it reports
 whether an update is available but does not apply it.
+
+### Tips
+
+- **Every iteration gets its own version number.** Don't reuse tags.
+  Tags are immutable release identifiers — re-tagging the same version
+  creates confusion in the fleet and breaks caching. Version numbers are
+  free; use them liberally.
+- **Pre-releases are invisible to stable nodes.** You can release v0.2.23,
+  v0.2.24, v0.2.25 as pre-releases and stable nodes won't see any of them.
+  Only the final promoted release reaches the fleet.
+- **The portal auto-reloads on version change.** The SSE health event
+  includes `portal_version`; when the browser detects a mismatch it does
+  `location.reload()`. No manual refresh needed after updates.
+- **`--dry-run` is your friend.** Always preview before releasing to
+  verify the version bump is what you expect.
 
 ## Rollback Behavior
 
