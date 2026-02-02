@@ -454,6 +454,10 @@ def api_status():
         'timestamp': datetime.now().isoformat()
     }
 
+    # Portal knows its own version — override the state file's lagging value
+    if data['data']['update']:
+        data['data']['update']['current_version'] = VERSION
+
     return jsonify(data)
 
 @app.route('/api/update/status')
@@ -549,6 +553,8 @@ def api_events():
                 'update': get_update_info() if UPDATE_MANAGER_AVAILABLE else None,
                 'wifi_ap': get_wifi_ap_info() if is_wifi_ap_active() else None,
             }
+            if status_data['update']:
+                status_data['update']['current_version'] = VERSION
             yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
             last_status_hash = hash(json.dumps(status_data, sort_keys=True))
             last_status_time = time.time()
@@ -585,6 +591,8 @@ def api_events():
                             'update': get_update_info() if UPDATE_MANAGER_AVAILABLE else None,
                             'wifi_ap': get_wifi_ap_info() if is_wifi_ap_active() else None,
                         }
+                        if status_data['update']:
+                            status_data['update']['current_version'] = VERSION
                         status_hash = hash(json.dumps(status_data, sort_keys=True))
                         if status_hash != last_status_hash:
                             yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
