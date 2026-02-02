@@ -1,3 +1,3 @@
 """Single source of truth for SAI-Cam version."""
 
-VERSION = "0.2.14"
+VERSION = "0.2.15"
