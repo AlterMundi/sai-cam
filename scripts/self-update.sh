@@ -46,8 +46,19 @@ main() {
     done
 
     # --- Logging ---
-    log() { logger -t "$LOG_TAG" -p "user.info" "$*"; echo "[$(date -Iseconds)] $*"; }
-    log_err() { logger -t "$LOG_TAG" -p "user.err" "$*"; echo "[$(date -Iseconds)] ERROR: $*" >&2; }
+    UPDATE_LOG="/var/log/sai-cam/update.log"
+    log() {
+        local msg="[$(date -Iseconds)] $*"
+        logger -t "$LOG_TAG" -p "user.info" "$*"
+        echo "$msg"
+        echo "$msg" >> "$UPDATE_LOG" 2>/dev/null || true
+    }
+    log_err() {
+        local msg="[$(date -Iseconds)] ERROR: $*"
+        logger -t "$LOG_TAG" -p "user.err" "$*"
+        echo "$msg" >&2
+        echo "$msg" >> "$UPDATE_LOG" 2>/dev/null || true
+    }
 
     # --- State helpers (call update_manager.py via deployed venv) ---
     read_state_field() {

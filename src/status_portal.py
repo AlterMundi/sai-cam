@@ -379,49 +379,43 @@ def get_network_info():
         logger.error(f"Error getting network info: {e}")
         return {}
 
-def get_recent_logs(lines=50):
-    """Get recent log entries using efficient tail-like reading"""
-    log_path = Path('/var/log/sai-cam/camera_service.log')
-    if not log_path.exists():
+def _tail_file(path, lines=50):
+    """Efficient tail: read last N lines from a file."""
+    if not path.exists():
         return []
-
     try:
-        # Efficient tail: read from end of file
-        with open(log_path, 'rb') as f:
-            # Seek to end
+        with open(path, 'rb') as f:
             f.seek(0, 2)
             file_size = f.tell()
-
             if file_size == 0:
                 return []
-
-            # Read chunks from end until we have enough lines
             chunk_size = 8192
             found_lines = []
             position = file_size
-
             while position > 0 and len(found_lines) < lines + 1:
                 read_size = min(chunk_size, position)
                 position -= read_size
                 f.seek(position)
                 chunk = f.read(read_size).decode('utf-8', errors='replace')
-
-                # Split and prepend to found lines
                 chunk_lines = chunk.split('\n')
                 if found_lines:
-                    # Merge partial line from previous chunk
                     chunk_lines[-1] += found_lines[0]
                     found_lines = chunk_lines + found_lines[1:]
                 else:
                     found_lines = chunk_lines
-
-            # Return last N non-empty lines
-            result = [line.strip() for line in found_lines if line.strip()]
-            return result[-lines:]
-
+            return [line.strip() for line in found_lines if line.strip()][-lines:]
     except (IOError, OSError, UnicodeDecodeError) as e:
-        logger.error(f"Error reading logs: {e}")
+        logger.error(f"Error reading {path}: {e}")
         return []
+
+def get_recent_logs(lines=50):
+    """Get recent log entries from camera and update logs, merged by timestamp."""
+    camera_lines = _tail_file(Path('/var/log/sai-cam/camera_service.log'), lines)
+    update_lines = _tail_file(Path('/var/log/sai-cam/update.log'), lines)
+    merged = camera_lines + update_lines
+    # Both logs use ISO timestamps at the start — sort lexicographically
+    merged.sort()
+    return merged[-lines:]
 
 # Routes
 
@@ -581,8 +575,14 @@ def api_events():
     - log:    real-time  — tail log file
     """
     def generate():
-        log_path = Path('/var/log/sai-cam/camera_service.log')
-        last_log_size = log_path.stat().st_size if log_path.exists() else 0
+        log_files = {
+            'camera': Path('/var/log/sai-cam/camera_service.log'),
+            'update': Path('/var/log/sai-cam/update.log'),
+        }
+        last_log_sizes = {
+            name: p.stat().st_size if p.exists() else 0
+            for name, p in log_files.items()
+        }
         last_health_hash = None
         last_status_hash = None
         last_slow_hash = None
@@ -666,20 +666,22 @@ def api_events():
                         logger.debug(f"Slow tier failed: {e}")
                     last_slow_time = now
 
-                # Log updates (real-time)
-                if log_path.exists():
-                    current_size = log_path.stat().st_size
-                    if current_size > last_log_size:
-                        with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                            f.seek(last_log_size)
+                # Log updates (real-time) — tail all log files
+                for log_name, log_file in log_files.items():
+                    if not log_file.exists():
+                        continue
+                    current_size = log_file.stat().st_size
+                    prev_size = last_log_sizes[log_name]
+                    if current_size > prev_size:
+                        with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                            f.seek(prev_size)
                             for line in f:
                                 line = line.strip()
                                 if line:
-                                    yield f"event: log\ndata: {json.dumps({'line': line})}\n\n"
-                        last_log_size = current_size
-                    elif current_size < last_log_size:
-                        # Log rotated - reset position
-                        last_log_size = 0
+                                    yield f"event: log\ndata: {json.dumps({'line': line, 'source': log_name})}\n\n"
+                        last_log_sizes[log_name] = current_size
+                    elif current_size < prev_size:
+                        last_log_sizes[log_name] = 0
 
                 time.sleep(1)
 
