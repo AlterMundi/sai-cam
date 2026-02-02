@@ -7,6 +7,8 @@ Wants=sai-cam.service
 Type=simple
 User=${SYSTEM_USER}
 Group=${SYSTEM_GROUP}
+SupplementaryGroups=sai-cam
+UMask=0002
 WorkingDirectory=${INSTALL_DIR}/src
 ExecStart=${INSTALL_DIR}/venv/bin/python3 ${INSTALL_DIR}/src/status_portal.py --config ${CONFIG_DIR}/config.yaml --port 8090
 Restart=on-failure
@@ -20,7 +22,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${LOG_DIR} ${INSTALL_DIR}/storage ${CONFIG_DIR}
+ReadWritePaths=${LOG_DIR} ${INSTALL_DIR}/storage ${CONFIG_DIR} /var/lib/sai-cam
 
 [Install]
 WantedBy=multi-user.target
