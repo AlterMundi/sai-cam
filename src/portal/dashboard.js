@@ -1,6 +1,7 @@
 /**
  * SAI-Cam Modular Dashboard
  * Progressive enhancement with feature detection
+ * Tiered SSE: 1s health, 20s status, 500s slow
  */
 
 let statusData = null;
