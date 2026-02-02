@@ -39,7 +39,7 @@ from version import VERSION
 
 # Import update manager for self-update state
 try:
-    from update_manager import get_update_info, write_state, check_version_newer, read_state
+    from update_manager import get_update_info, check_version_newer
     UPDATE_MANAGER_AVAILABLE = True
 except ImportError:
     UPDATE_MANAGER_AVAILABLE = False
@@ -469,10 +469,11 @@ def api_update_status():
 
 @app.route('/api/update/check', methods=['POST'])
 def api_update_check():
-    """Check GitHub for new releases and update state file.
+    """Check GitHub for new releases (read-only, no state file writes).
 
-    Lightweight version of self-update.sh --check: queries GitHub Releases API,
-    compares versions, writes state. Does NOT apply any update.
+    Queries GitHub Releases API, compares versions. For beta channel,
+    also compares the release commit SHA against the deployed repo HEAD
+    to detect same-version iterations.
     """
     if not UPDATE_MANAGER_AVAILABLE:
         return jsonify({'error': 'update_manager not available'}), 501
@@ -481,17 +482,17 @@ def api_update_check():
 
     channel = config.get('updates', {}).get('channel', 'stable')
     github_api = 'https://api.github.com/repos/AlterMundi/sai-cam/releases'
+    repo_dir = '/opt/sai-cam/repo'
 
     try:
         resp = http_requests.get(github_api, headers={'Accept': 'application/vnd.github.v3+json'}, timeout=15)
         resp.raise_for_status()
         releases = resp.json()
     except Exception as e:
-        write_state(last_check=datetime.now().isoformat(), status='check_failed')
         return jsonify({'error': f'Failed to query GitHub: {e}'}), 502
 
     # Find latest release for channel
-    target_tag = None
+    target_release = None
     for r in releases:
         if r.get('draft', False):
             continue
@@ -500,37 +501,38 @@ def api_update_check():
             continue
         if channel == 'stable' and r.get('prerelease', False):
             continue
-        target_tag = tag
+        target_release = r
         break
 
-    if not target_tag:
-        write_state(last_check=datetime.now().isoformat(), status='up_to_date',
-                     current_version=VERSION, channel=channel)
-        return jsonify({'status': 'up_to_date', 'current_version': VERSION, 'channel': channel})
+    if not target_release:
+        return jsonify({
+            'status': 'up_to_date', 'current_version': VERSION,
+            'latest_available': VERSION, 'update_available': False, 'channel': channel,
+        })
 
+    target_tag = target_release['tag_name']
     target_version = target_tag.lstrip('v')
     update_available = check_version_newer(VERSION, target_version)
 
-    status = 'up_to_date' if not update_available else read_state().get('status', 'unknown')
-    # Don't overwrite active statuses like 'updating'
-    if status in ('updating', 'rolling_back'):
-        pass
-    elif not update_available:
-        status = 'up_to_date'
-
-    write_state(
-        last_check=datetime.now().isoformat(),
-        current_version=VERSION,
-        latest_available=target_version,
-        channel=channel,
-        status=status,
-    )
+    # Beta channel: same version but different commit = update available
+    beta_update = False
+    if not update_available and channel == 'beta' and os.path.isdir(os.path.join(repo_dir, '.git')):
+        try:
+            release_sha = target_release.get('target_commitish', '')
+            deployed_sha = subprocess.check_output(
+                ['git', '-C', repo_dir, 'rev-parse', 'HEAD'],
+                stderr=subprocess.DEVNULL, text=True
+            ).strip()
+            if release_sha and deployed_sha and release_sha != deployed_sha:
+                beta_update = True
+        except Exception:
+            pass
 
     return jsonify({
-        'status': status,
+        'status': 'up_to_date' if not (update_available or beta_update) else 'update_available',
         'current_version': VERSION,
         'latest_available': target_version,
-        'update_available': update_available,
+        'update_available': update_available or beta_update,
         'channel': channel,
     })
 
