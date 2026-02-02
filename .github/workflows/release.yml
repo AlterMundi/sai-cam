@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tag format
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z]+\.[0-9]+)?$ ]]; then
+            echo "::error::Invalid tag format: $TAG (expected vX.Y.Z or vX.Y.Z-suffix.N)"
+            exit 1
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Verify version.py matches tag
+        run: |
+          FILE_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' src/version.py)
+          if [[ "$FILE_VERSION" != "$VERSION" ]]; then
+            echo "::error::Version mismatch: src/version.py has '$FILE_VERSION' but tag is '$TAG' (expected '$VERSION')"
+            exit 1
+          fi
+          echo "Verified: src/version.py ($FILE_VERSION) matches tag ($TAG)"
+
+      - name: Detect prerelease
+        id: meta
+        run: |
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Detected prerelease: $VERSION"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Detected stable release: $VERSION"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARGS=(
+            "$TAG"
+            --title "$TAG"
+            --generate-notes
+          )
+          if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "${ARGS[@]}"
