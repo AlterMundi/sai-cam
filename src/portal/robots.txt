@@ -1,0 +1,5 @@
+# SAI-Cam Edge Node Status Portal
+# Local network device — no public crawling expected
+User-agent: *
+Allow: /
+Disallow: /api/

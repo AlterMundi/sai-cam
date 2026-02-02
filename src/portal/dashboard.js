@@ -322,10 +322,104 @@ const BLOCKS = {
         </div>
       `;
     }
+  },
+
+  'updates': {
+    title: 'Updates',
+    icon: '🔄',
+    order: 7,
+    detector: (status) => status.data.update !== undefined && status.data.update !== null,
+    render: function(data) {
+      const u = data.update;
+      const statusLabels = {
+        'unknown': 'Unknown',
+        'up_to_date': 'Up to date',
+        'updated': 'Updated',
+        'updating': 'Updating...',
+        'check_failed': 'Check failed',
+        'fetch_failed': 'Fetch failed',
+        'preflight_failed': 'Preflight failed',
+        'rollback_completed': 'Rolled back',
+        'rollback_failed': 'Rollback failed',
+        'rolling_back': 'Rolling back...',
+      };
+      const statusClass = u.consecutive_failures > 0 ? 'warning'
+        : ['check_failed', 'fetch_failed', 'preflight_failed', 'rollback_failed'].includes(u.status) ? 'critical'
+        : ['up_to_date', 'updated'].includes(u.status) ? 'ok'
+        : '';
+      const statusLabel = statusLabels[u.status] || u.status;
+
+      const lastCheck = u.last_check ? formatTimestamp(u.last_check) : 'Never';
+      const lastUpdate = u.last_update ? formatTimestamp(u.last_update) : 'Never';
+
+      return `
+        <div class="block">
+          <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
+          <div class="update-version-row">
+            <div class="update-current">
+              <span class="update-version-label">Current</span>
+              <span class="update-version-value">v${u.current_version}</span>
+            </div>
+            ${u.latest_available ? `
+              <div class="update-arrow">${u.update_available ? '→' : '='}</div>
+              <div class="update-latest ${u.update_available ? 'available' : ''}">
+                <span class="update-version-label">Latest</span>
+                <span class="update-version-value">v${u.latest_available}</span>
+              </div>
+            ` : ''}
+          </div>
+          ${u.update_available ? `
+            <div class="update-banner">Update available</div>
+          ` : ''}
+          <div class="update-details">
+            <div class="update-detail-row">
+              <span class="update-detail-label">Status</span>
+              <span class="update-status-badge ${statusClass}">${statusLabel}</span>
+            </div>
+            <div class="update-detail-row">
+              <span class="update-detail-label">Channel</span>
+              <span class="update-detail-value">${u.channel}</span>
+            </div>
+            <div class="update-detail-row">
+              <span class="update-detail-label">Last check</span>
+              <span class="update-detail-value">${lastCheck}</span>
+            </div>
+            <div class="update-detail-row">
+              <span class="update-detail-label">Last update</span>
+              <span class="update-detail-value">${lastUpdate}</span>
+            </div>
+            ${u.consecutive_failures > 0 ? `
+              <div class="update-detail-row">
+                <span class="update-detail-label">Failures</span>
+                <span class="update-detail-value critical">${u.consecutive_failures}</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
   }
 };
 
 // Utility functions
+
+function formatTimestamp(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHrs = Math.floor(diffMin / 60);
+    if (diffHrs < 24) return `${diffHrs}h ago`;
+    const diffDays = Math.floor(diffHrs / 24);
+    return `${diffDays}d ago`;
+  } catch (e) {
+    return isoStr;
+  }
+}
 
 function formatUptime(seconds) {
   const days = Math.floor(seconds / 86400);

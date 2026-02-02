@@ -338,6 +338,92 @@ class TestPostRoutes:
 # Service status
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Update routes
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestUpdateRoutes:
+
+    @patch("status_portal.UPDATE_MANAGER_AVAILABLE", True)
+    @patch("status_portal.get_update_info")
+    def test_api_update_status_returns_info(self, mock_info, client):
+        mock_info.return_value = {
+            'status': 'up_to_date',
+            'current_version': '0.2.9',
+            'latest_available': '0.2.9',
+            'update_available': False,
+            'channel': 'stable',
+            'consecutive_failures': 0,
+            'last_check': '2026-02-01T10:00:00',
+            'last_update': '',
+            'previous_version': '',
+        }
+        resp = client.get('/api/update/status')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['status'] == 'up_to_date'
+        assert data['current_version'] == '0.2.9'
+        assert data['update_available'] is False
+
+    @patch("status_portal.UPDATE_MANAGER_AVAILABLE", False)
+    def test_api_update_status_501_when_unavailable(self, client):
+        resp = client.get('/api/update/status')
+        assert resp.status_code == 501
+        assert 'error' in resp.get_json()
+
+    @patch("status_portal.UPDATE_MANAGER_AVAILABLE", True)
+    @patch("status_portal.get_update_info")
+    def test_api_update_status_shows_update_available(self, mock_info, client):
+        mock_info.return_value = {
+            'status': 'up_to_date',
+            'current_version': '0.2.8',
+            'latest_available': '0.3.0',
+            'update_available': True,
+            'channel': 'stable',
+            'consecutive_failures': 0,
+            'last_check': '2026-02-01T10:00:00',
+            'last_update': '',
+            'previous_version': '',
+        }
+        resp = client.get('/api/update/status')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['update_available'] is True
+        assert data['latest_available'] == '0.3.0'
+
+    @patch("status_portal.UPDATE_MANAGER_AVAILABLE", True)
+    @patch("status_portal.get_update_info")
+    @patch("status_portal.get_wifi_ap_info", return_value=None)
+    @patch("status_portal.get_storage_info", return_value=None)
+    @patch("status_portal.get_network_info", return_value={})
+    @patch("status_portal.get_camera_status", return_value=[])
+    @patch("status_portal.get_system_info", return_value={'cpu_percent': 10})
+    @patch("status_portal.detect_features")
+    @patch("status_portal.is_wifi_ap_active", return_value=False)
+    def test_api_status_includes_update_field(self, mock_wifi, mock_feat, mock_sys,
+                                               mock_cam, mock_net, mock_stor,
+                                               mock_wifi_info, mock_update, client):
+        mock_feat.return_value = {
+            'wifi_ap': False, 'cameras': False, 'storage': False,
+            'monitoring': True, 'onvif': False, 'rtsp': False, 'usb_camera': False,
+        }
+        mock_update.return_value = {
+            'status': 'updated', 'current_version': '0.2.9',
+            'latest_available': '0.2.9', 'update_available': False,
+            'channel': 'stable', 'consecutive_failures': 0,
+            'last_check': '', 'last_update': '', 'previous_version': '',
+        }
+        resp = client.get('/api/status')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert 'update' in data['data']
+        assert data['data']['update']['status'] == 'updated'
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Service status
+# ──────────────────────────────────────────────────────────────────────────────
+
 class TestServiceStatus:
 
     @patch("status_portal.subprocess")

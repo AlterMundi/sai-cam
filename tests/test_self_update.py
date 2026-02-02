@@ -38,7 +38,8 @@ def _make_repo_tree(tmp_path, version='0.3.0', missing_files=None):
     (repo / 'systemd').mkdir(exist_ok=True)
 
     files = {
-        'src/camera_service.py': f'VERSION = "{version}"\n',
+        'src/version.py': f'VERSION = "{version}"\n',
+        'src/camera_service.py': f'from version import VERSION\n',
         'src/status_portal.py': '# portal\n',
         'scripts/install.sh': '#!/bin/bash\necho "install"\n',
         'systemd/sai-cam.service.template': '[Unit]\n',
@@ -319,3 +320,93 @@ class TestScriptFile:
         with open(SELF_UPDATE_SH) as f:
             content = f.read()
         assert 'rollback' in content.lower(), "self-update.sh should have rollback logic"
+
+    def test_self_update_reads_version_from_version_py(self):
+        """self-update.sh should read VERSION from version.py, not camera_service.py."""
+        with open(SELF_UPDATE_SH) as f:
+            content = f.read()
+        assert 'version.py' in content, "self-update.sh should reference version.py"
+
+    def test_self_update_has_health_timeout(self):
+        with open(SELF_UPDATE_SH) as f:
+            content = f.read()
+        assert 'HEALTH_TIMEOUT' in content, "self-update.sh should define HEALTH_TIMEOUT"
+
+    def test_self_update_has_preserve_config(self):
+        """Update should use --preserve-config to keep user settings."""
+        with open(SELF_UPDATE_SH) as f:
+            content = f.read()
+        assert '--preserve-config' in content
+
+
+# ---------------------------------------------------------------------------
+# version.py validation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.smoke
+class TestVersionFile:
+    def test_version_py_importable(self):
+        """version.py should be importable as a module."""
+        from version import VERSION
+        assert isinstance(VERSION, str)
+
+    def test_version_format(self):
+        """VERSION should follow semver format (X.Y.Z)."""
+        import re
+        from version import VERSION
+        assert re.match(r'^\d+\.\d+\.\d+', VERSION), \
+            f"VERSION '{VERSION}' doesn't match semver format"
+
+    def test_version_not_zero(self):
+        """VERSION should not be the placeholder 0.0.0."""
+        from version import VERSION
+        assert VERSION != '0.0.0'
+
+
+# ---------------------------------------------------------------------------
+# Portal static file validation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.smoke
+class TestPortalFiles:
+    PORTAL_DIR = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), '..', 'src', 'portal'))
+
+    def test_index_html_exists(self):
+        assert os.path.isfile(os.path.join(self.PORTAL_DIR, 'index.html'))
+
+    def test_dashboard_js_exists(self):
+        assert os.path.isfile(os.path.join(self.PORTAL_DIR, 'dashboard.js'))
+
+    def test_styles_css_exists(self):
+        assert os.path.isfile(os.path.join(self.PORTAL_DIR, 'styles.css'))
+
+    def test_robots_txt_exists(self):
+        assert os.path.isfile(os.path.join(self.PORTAL_DIR, 'robots.txt'))
+
+    def test_robots_txt_disallows_api(self):
+        with open(os.path.join(self.PORTAL_DIR, 'robots.txt')) as f:
+            content = f.read()
+        assert 'Disallow: /api/' in content
+
+    def test_index_has_theme_color(self):
+        with open(os.path.join(self.PORTAL_DIR, 'index.html')) as f:
+            content = f.read()
+        assert 'theme-color' in content
+
+    def test_index_has_viewport_meta(self):
+        with open(os.path.join(self.PORTAL_DIR, 'index.html')) as f:
+            content = f.read()
+        assert 'viewport' in content
+
+    def test_dashboard_has_updates_block(self):
+        """Dashboard JS should register an updates block."""
+        with open(os.path.join(self.PORTAL_DIR, 'dashboard.js')) as f:
+            content = f.read()
+        assert "'updates'" in content
+        assert 'data.update' in content
+
+    def test_dashboard_has_format_timestamp(self):
+        with open(os.path.join(self.PORTAL_DIR, 'dashboard.js')) as f:
+            content = f.read()
+        assert 'formatTimestamp' in content
