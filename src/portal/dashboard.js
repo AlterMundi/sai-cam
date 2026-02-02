@@ -332,6 +332,16 @@ const BLOCKS = {
     detector: (status) => status.data.update !== undefined && status.data.update !== null,
     render: function(data) {
       const u = data.update;
+
+      // Client-side override: if portal version matches latest, we're up to date
+      // regardless of what the lagging state file says
+      if (u.current_version && u.latest_available && u.current_version === u.latest_available) {
+        u.update_available = false;
+        if (u.status === 'updating' || u.status === 'unknown') {
+          u.status = 'up_to_date';
+        }
+      }
+
       const statusLabels = {
         'unknown': 'Unknown',
         'up_to_date': 'Up to date',
@@ -355,7 +365,7 @@ const BLOCKS = {
 
       return `
         <div class="block">
-          <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
+          <h3><span class="icon">${this.icon}</span> ${this.title}<button class="update-check-btn" onclick="checkForUpdates(this)" title="Check for updates">↻</button></h3>
           <div class="update-version-row">
             <div class="update-current">
               <span class="update-version-label">Current</span>
@@ -1226,6 +1236,23 @@ function rerenderBlock(blockKey, dataOverrides) {
       wrapper.replaceWith(newBlock);
       return;
     }
+  }
+}
+
+async function checkForUpdates(btn) {
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  try {
+    const resp = await fetch('/api/update/check', { method: 'POST' });
+    const data = await resp.json();
+    if (resp.ok) {
+      rerenderBlock('updates', { update: data });
+    }
+  } catch (e) {
+    console.error('Update check failed:', e);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('spinning');
   }
 }
 

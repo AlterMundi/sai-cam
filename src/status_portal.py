@@ -39,7 +39,7 @@ from version import VERSION
 
 # Import update manager for self-update state
 try:
-    from update_manager import get_update_info
+    from update_manager import get_update_info, write_state, check_version_newer, read_state
     UPDATE_MANAGER_AVAILABLE = True
 except ImportError:
     UPDATE_MANAGER_AVAILABLE = False
@@ -466,6 +466,73 @@ def api_update_status():
     if not UPDATE_MANAGER_AVAILABLE:
         return jsonify({'error': 'update_manager not available'}), 501
     return jsonify(get_update_info())
+
+@app.route('/api/update/check', methods=['POST'])
+def api_update_check():
+    """Check GitHub for new releases and update state file.
+
+    Lightweight version of self-update.sh --check: queries GitHub Releases API,
+    compares versions, writes state. Does NOT apply any update.
+    """
+    if not UPDATE_MANAGER_AVAILABLE:
+        return jsonify({'error': 'update_manager not available'}), 501
+
+    import requests as http_requests
+
+    channel = config.get('updates', {}).get('channel', 'stable')
+    github_api = 'https://api.github.com/repos/AlterMundi/sai-cam/releases'
+
+    try:
+        resp = http_requests.get(github_api, headers={'Accept': 'application/vnd.github.v3+json'}, timeout=15)
+        resp.raise_for_status()
+        releases = resp.json()
+    except Exception as e:
+        write_state(last_check=datetime.now().isoformat(), status='check_failed')
+        return jsonify({'error': f'Failed to query GitHub: {e}'}), 502
+
+    # Find latest release for channel
+    target_tag = None
+    for r in releases:
+        if r.get('draft', False):
+            continue
+        tag = r.get('tag_name', '')
+        if not tag:
+            continue
+        if channel == 'stable' and r.get('prerelease', False):
+            continue
+        target_tag = tag
+        break
+
+    if not target_tag:
+        write_state(last_check=datetime.now().isoformat(), status='up_to_date',
+                     current_version=VERSION, channel=channel)
+        return jsonify({'status': 'up_to_date', 'current_version': VERSION, 'channel': channel})
+
+    target_version = target_tag.lstrip('v')
+    update_available = check_version_newer(VERSION, target_version)
+
+    status = 'up_to_date' if not update_available else read_state().get('status', 'unknown')
+    # Don't overwrite active statuses like 'updating'
+    if status in ('updating', 'rolling_back'):
+        pass
+    elif not update_available:
+        status = 'up_to_date'
+
+    write_state(
+        last_check=datetime.now().isoformat(),
+        current_version=VERSION,
+        latest_available=target_version,
+        channel=channel,
+        status=status,
+    )
+
+    return jsonify({
+        'status': status,
+        'current_version': VERSION,
+        'latest_available': target_version,
+        'update_available': update_available,
+        'channel': channel,
+    })
 
 @app.route('/api/status/cameras')
 def api_cameras():
