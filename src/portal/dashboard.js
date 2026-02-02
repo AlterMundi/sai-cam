@@ -477,8 +477,16 @@ async function fetchServiceStatus() {
 }
 
 function updateServiceStatusUI(status) {
+  const wasInactive = !serviceStatus.active;
+  const nowActive = status.active;
   serviceStatus = status;
   updateNodeStatus();
+
+  // Auto-refresh dashboard when service transitions from stopped to live
+  if (wasInactive && nowActive) {
+    console.log('Service came online, refreshing dashboard...');
+    manualRefresh();
+  }
 }
 
 function updateNodeStatus() {
