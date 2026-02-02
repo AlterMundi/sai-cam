@@ -1040,14 +1040,25 @@ function connectEventStream() {
     setTimeout(connectEventStream, 5000);
   };
 
-  eventSource.onopen = () => {
+  eventSource.onopen = async () => {
     console.log('SSE connection established');
     updateConnectionStatus(true);
 
-    // Auto-refresh dashboard when reconnecting after disconnection
+    // After reconnection, check if server version changed (i.e. an update happened)
     if (sseWasDisconnected) {
-      console.log('Reconnected after disconnection, refreshing dashboard...');
       sseWasDisconnected = false;
+      try {
+        const status = await fetchStatus();
+        const displayedVersion = document.getElementById('version')?.textContent;
+        if (status && displayedVersion && status.node.version !== displayedVersion) {
+          console.log(`Version changed: ${displayedVersion} → ${status.node.version}, reloading page...`);
+          location.reload();
+          return;
+        }
+      } catch (e) {
+        console.warn('Version check failed:', e);
+      }
+      console.log('Reconnected after disconnection, refreshing dashboard...');
       manualRefresh();
     }
   };
