@@ -1206,6 +1206,21 @@ function updateStatusData(status) {
       internetEl.className = status.network.upstream_online ? 'status-online' : 'status-offline';
     }
   }
+
+  // Re-render Updates card with fresh state from server
+  if (status.update) {
+    const container = document.getElementById('blocks-container');
+    if (!container) return;
+    // Find existing updates block wrapper
+    const existing = container.querySelector('.block-wrapper:has(.update-version-row)');
+    if (existing) {
+      // Update statusData so the block renders with fresh data
+      if (statusData) statusData.data.update = status.update;
+      const blockConfig = BLOCKS['updates'];
+      const newBlock = createBlock(blockConfig, { ...statusData?.data, update: status.update });
+      existing.replaceWith(newBlock);
+    }
+  }
 }
 
 // Initialize dashboard

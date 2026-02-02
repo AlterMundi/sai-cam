@@ -560,12 +560,13 @@ def api_events():
                         last_health_hash = health_hash
                     last_health_time = now
 
-                # Status updates - network/storage (every 30s)
+                # Status updates - network/storage/update (every 30s)
                 if now - last_status_time >= 30:
                     try:
                         status_data = {
                             'network': get_network_info(),
                             'storage': get_storage_info(),
+                            'update': get_update_info() if UPDATE_MANAGER_AVAILABLE else None,
                         }
                         status_hash = hash(json.dumps(status_data, sort_keys=True))
                         if status_hash != last_status_hash:
