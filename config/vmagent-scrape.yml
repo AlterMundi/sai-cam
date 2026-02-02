@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  external_labels:
+    node_id: '${NODE_ID}'
+
+scrape_configs:
+  - job_name: 'saicam'
+    static_configs:
+      - targets: ['127.0.0.1:8090']
+    metrics_path: '/metrics'

@@ -100,6 +100,13 @@ advanced:
   reconnect_attempts: 3
   reconnect_delay: 5
 
+# Metrics / Monitoring (optional)
+metrics:
+  enabled: true
+  remote_write_url: 'https://netmaker.altermundi.net/vmwrite'
+  remote_write_user: 'vmwriter'
+  remote_write_password: 'sr417iUM1btwvaOrTtbd'
+
 # Status Portal Configuration (optional - uses smart defaults if omitted)
 portal:
   enabled: true            # Enable web status portal

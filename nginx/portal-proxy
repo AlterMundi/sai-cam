@@ -9,6 +9,8 @@ server {
 
     server_name _;
 
+    add_header X-Frame-Options "SAMEORIGIN" always;
+
     # Captive portal detection endpoints - return 302 to trigger portal prompt
     location /generate_204 {
         return 302 http://__AP_IP__/;

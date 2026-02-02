@@ -194,3 +194,6 @@ scripts/*deploy*
 scripts/*prod*
 config/config.yaml
 CLAUDE.md
+
+# Monitoring secrets
+monitoring/.env

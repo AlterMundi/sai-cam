@@ -1691,3 +1691,124 @@ footer p {
 .alert-banner.alert-error {
   background: var(--error-color);
 }
+
+/* Updates Block */
+.update-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgba(13, 148, 136, 0.08);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+}
+
+.update-current,
+.update-latest {
+  text-align: center;
+}
+
+.update-version-label {
+  display: block;
+  font-size: 0.7em;
+  color: var(--sai-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.update-version-value {
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--sai-text);
+}
+
+.update-latest.available .update-version-value {
+  color: var(--sai-orange);
+}
+
+.update-arrow {
+  font-size: 1.2em;
+  color: var(--sai-text-muted);
+  font-weight: 300;
+}
+
+.update-banner {
+  text-align: center;
+  padding: 6px 12px;
+  background: rgba(255, 92, 0, 0.15);
+  border: 1px solid rgba(255, 92, 0, 0.4);
+  border-radius: 6px;
+  color: var(--sai-orange);
+  font-size: 0.8em;
+  font-weight: 600;
+  margin-bottom: 12px;
+  letter-spacing: 0.3px;
+}
+
+.update-details {
+  display: grid;
+  gap: 6px;
+}
+
+.update-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(13, 148, 136, 0.1);
+}
+
+.update-detail-row:last-child {
+  border-bottom: none;
+}
+
+.update-detail-label {
+  font-size: 0.75em;
+  color: var(--sai-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.update-detail-value {
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.8em;
+  color: var(--sai-text-secondary);
+}
+
+.update-detail-value.critical {
+  color: var(--error-color);
+  font-weight: 600;
+}
+
+.update-status-badge {
+  font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.75em;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(13, 148, 136, 0.15);
+  border: 1px solid var(--card-border);
+  color: var(--sai-text-secondary);
+}
+
+.update-status-badge.ok {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+.update-status-badge.warning {
+  background: rgba(255, 92, 0, 0.15);
+  border-color: rgba(255, 92, 0, 0.4);
+  color: var(--sai-orange);
+}
+
+.update-status-badge.critical {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
