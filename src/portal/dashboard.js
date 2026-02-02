@@ -477,16 +477,8 @@ async function fetchServiceStatus() {
 }
 
 function updateServiceStatusUI(status) {
-  const wasInactive = !serviceStatus.active;
-  const nowActive = status.active;
   serviceStatus = status;
   updateNodeStatus();
-
-  // Auto-refresh dashboard when service transitions from stopped to live
-  if (wasInactive && nowActive) {
-    console.log('Service came online, refreshing dashboard...');
-    manualRefresh();
-  }
 }
 
 function updateNodeStatus() {
@@ -1004,6 +996,7 @@ function editCameraPosition(row, cameraId) {
 // ========================================
 
 let eventSource = null;
+let sseWasDisconnected = false;
 
 function connectEventStream() {
   if (eventSource) {
@@ -1041,6 +1034,7 @@ function connectEventStream() {
 
   eventSource.onerror = () => {
     console.warn('SSE connection error, reconnecting in 5s...');
+    sseWasDisconnected = true;
     updateConnectionStatus(false);
     eventSource.close();
     setTimeout(connectEventStream, 5000);
@@ -1049,6 +1043,13 @@ function connectEventStream() {
   eventSource.onopen = () => {
     console.log('SSE connection established');
     updateConnectionStatus(true);
+
+    // Auto-refresh dashboard when reconnecting after disconnection
+    if (sseWasDisconnected) {
+      console.log('Reconnected after disconnection, refreshing dashboard...');
+      sseWasDisconnected = false;
+      manualRefresh();
+    }
   };
 }
 
