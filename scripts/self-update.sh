@@ -217,7 +217,7 @@ except ImportError:
         if [ "$CHANNEL" = "beta" ] && [ -d "$REPO_DIR/.git" ]; then
             # Fetch the tag so we can resolve its SHA
             cd "$REPO_DIR"
-            git fetch --depth 50 origin "refs/tags/$TARGET_TAG:refs/tags/$TARGET_TAG" 2>/dev/null || true
+            git fetch --depth 50 origin "+refs/tags/$TARGET_TAG:refs/tags/$TARGET_TAG" 2>/dev/null || true
             TAG_SHA=$(git rev-parse "refs/tags/$TARGET_TAG^{}" 2>/dev/null || echo "")
             DEPLOYED_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
             if [ -n "$TAG_SHA" ] && [ "$TAG_SHA" != "$DEPLOYED_SHA" ]; then
