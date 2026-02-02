@@ -471,9 +471,7 @@ def api_update_status():
 def api_update_check():
     """Check GitHub for new releases (read-only, no state file writes).
 
-    Queries GitHub Releases API, compares versions. For beta channel,
-    also compares the release commit SHA against the deployed repo HEAD
-    to detect same-version iterations.
+    Queries GitHub Releases API, compares versions against running VERSION.
     """
     if not UPDATE_MANAGER_AVAILABLE:
         return jsonify({'error': 'update_manager not available'}), 501
@@ -482,7 +480,6 @@ def api_update_check():
 
     channel = config.get('updates', {}).get('channel', 'stable')
     github_api = 'https://api.github.com/repos/AlterMundi/sai-cam/releases'
-    repo_dir = '/opt/sai-cam/repo'
 
     try:
         resp = http_requests.get(github_api, headers={'Accept': 'application/vnd.github.v3+json'}, timeout=15)
@@ -492,7 +489,7 @@ def api_update_check():
         return jsonify({'error': f'Failed to query GitHub: {e}'}), 502
 
     # Find latest release for channel
-    target_release = None
+    target_tag = None
     for r in releases:
         if r.get('draft', False):
             continue
@@ -501,38 +498,23 @@ def api_update_check():
             continue
         if channel == 'stable' and r.get('prerelease', False):
             continue
-        target_release = r
+        target_tag = tag
         break
 
-    if not target_release:
+    if not target_tag:
         return jsonify({
             'status': 'up_to_date', 'current_version': VERSION,
             'latest_available': VERSION, 'update_available': False, 'channel': channel,
         })
 
-    target_tag = target_release['tag_name']
     target_version = target_tag.lstrip('v')
     update_available = check_version_newer(VERSION, target_version)
 
-    # Beta channel: same version but different commit = update available
-    beta_update = False
-    if not update_available and channel == 'beta' and os.path.isdir(os.path.join(repo_dir, '.git')):
-        try:
-            release_sha = target_release.get('target_commitish', '')
-            deployed_sha = subprocess.check_output(
-                ['git', '-C', repo_dir, 'rev-parse', 'HEAD'],
-                stderr=subprocess.DEVNULL, text=True
-            ).strip()
-            if release_sha and deployed_sha and release_sha != deployed_sha:
-                beta_update = True
-        except Exception:
-            pass
-
     return jsonify({
-        'status': 'up_to_date' if not (update_available or beta_update) else 'update_available',
+        'status': 'update_available' if update_available else 'up_to_date',
         'current_version': VERSION,
         'latest_available': target_version,
-        'update_available': update_available or beta_update,
+        'update_available': update_available,
         'channel': channel,
     })
 

@@ -98,6 +98,40 @@ Location: `/var/lib/sai-cam/update-state.json`
 | `consecutive_failures` | Count of sequential failed updates (resets on success) |
 | `channel` | `stable` or `beta` |
 
+## Release Workflow
+
+### Stable release
+
+```bash
+./scripts/release.sh              # patch bump, tag, push
+# CI creates a GitHub Release (not pre-release)
+# All nodes pick it up on their next 6h check
+```
+
+### Beta iteration
+
+Beta nodes (`channel: beta`) see pre-releases. Iterate by bumping the
+version each time — every commit that should reach the fleet gets its own tag:
+
+```bash
+./scripts/release.sh --beta       # 0.2.22 → 0.2.23, tagged, pre-release
+# test on beta node...
+./scripts/release.sh --beta       # 0.2.23 → 0.2.24, tagged, pre-release
+# happy? promote to stable:
+./scripts/release.sh              # 0.2.24 → 0.2.25, tagged, full release
+```
+
+> **Tip:** Don't reuse tags. Each iteration is a new version number.
+> Tags are immutable release identifiers — re-tagging the same version
+> creates confusion in the fleet and breaks caching. Semver is cheap;
+> version numbers are free.
+
+### Manual check from the portal
+
+The Updates card has a ↻ button that queries GitHub Releases from the
+browser (via `POST /api/update/check`). This is read-only — it shows
+whether an update is available but does not apply it.
+
 ## Rollback Behavior
 
 - Health check runs for up to 120 seconds after applying an update

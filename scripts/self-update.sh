@@ -212,27 +212,11 @@ except ImportError:
 " 2>/dev/null)
 
     if [ "$IS_NEWER" != "yes" ]; then
-        # Beta channel: even if version matches, check if the tag points to a
-        # different commit than what's currently deployed (iterate on same version)
-        if [ "$CHANNEL" = "beta" ] && [ -d "$REPO_DIR/.git" ]; then
-            # Fetch the tag so we can resolve its SHA
-            cd "$REPO_DIR"
-            git fetch --depth 50 origin "+refs/tags/$TARGET_TAG:refs/tags/$TARGET_TAG" 2>/dev/null || true
-            TAG_SHA=$(git rev-parse "refs/tags/$TARGET_TAG^{}" 2>/dev/null || echo "")
-            DEPLOYED_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
-            if [ -n "$TAG_SHA" ] && [ "$TAG_SHA" != "$DEPLOYED_SHA" ]; then
-                log "Beta channel: same version but new commit ($DEPLOYED_SHA -> $TAG_SHA), updating."
-                IS_NEWER="yes"
-            fi
-        fi
-
-        if [ "$IS_NEWER" != "yes" ]; then
-            log "Already up-to-date ($CURRENT_VERSION >= $TARGET_VERSION)"
-            write_state "last_check=$(date -Iseconds)" "status=up_to_date" \
-                "current_version=$CURRENT_VERSION" "latest_available=$TARGET_VERSION" \
-                "channel=$CHANNEL"
-            exit 0
-        fi
+        log "Already up-to-date ($CURRENT_VERSION >= $TARGET_VERSION)"
+        write_state "last_check=$(date -Iseconds)" "status=up_to_date" \
+            "current_version=$CURRENT_VERSION" "latest_available=$TARGET_VERSION" \
+            "channel=$CHANNEL"
+        exit 0
     fi
 
     log "Update available: $CURRENT_VERSION -> $TARGET_VERSION ($TARGET_TAG)"
