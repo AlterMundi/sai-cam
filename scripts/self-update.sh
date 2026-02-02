@@ -117,7 +117,11 @@ try:
     v = c
     for k in keys:
         v = v[k]
-    print(v)
+    # Normalize booleans to lowercase strings for bash comparison
+    if isinstance(v, bool):
+        print('true' if v else 'false')
+    else:
+        print(v)
 except Exception:
     print('$default')
 " 2>/dev/null || echo "$default"
