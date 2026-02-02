@@ -365,7 +365,8 @@ const BLOCKS = {
 
       return `
         <div class="block">
-          <h3><span class="icon">${this.icon}</span> ${this.title}<button class="update-check-btn" onclick="checkForUpdates(this)" title="Check for updates">↻</button></h3>
+          <h3><span class="icon">${this.icon}</span> ${this.title}</h3>
+          <button class="update-check-btn" onclick="checkForUpdates(this)" title="Check for updates">↻</button>
           <div class="update-version-row">
             <div class="update-current">
               <span class="update-version-label">Current</span>

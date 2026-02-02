@@ -199,6 +199,7 @@ main {
 
 /* Cards with teal glow */
 .block {
+  position: relative;
   background: var(--card-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -1694,7 +1695,9 @@ footer p {
 
 /* Updates Block */
 .update-check-btn {
-  float: right;
+  position: absolute;
+  top: 16px;
+  right: 16px;
   background: none;
   border: 1px solid var(--sai-text-muted);
   color: var(--sai-text-secondary);
@@ -1706,7 +1709,6 @@ footer p {
   cursor: pointer;
   padding: 0;
   transition: all 0.2s ease;
-  margin-top: -2px;
 }
 .update-check-btn:hover {
   color: var(--sai-orange);
