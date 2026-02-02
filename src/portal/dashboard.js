@@ -622,6 +622,7 @@ async function renderDashboard(forceFullRender = false) {
     sortedBlocks.forEach(([key, blockConfig]) => {
       if (blockConfig.detector(status)) {
         const blockEl = createBlock(blockConfig, status.data);
+        blockEl.dataset.blockKey = key;
         container.appendChild(blockEl);
       }
     });
@@ -1032,6 +1033,15 @@ function connectEventStream() {
     }
   });
 
+  eventSource.addEventListener('slow', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      updateSlowData(data);
+    } catch (error) {
+      console.error('Error parsing slow data:', error);
+    }
+  });
+
   eventSource.onerror = () => {
     console.warn('SSE connection error, reconnecting in 5s...');
     sseWasDisconnected = true;
@@ -1099,6 +1109,7 @@ function updateHealthData(health) {
       updateCameraCard(id, cam);
     });
   }
+
 }
 
 function updateGauge(type, value, options = {}) {
@@ -1191,41 +1202,72 @@ function appendLogLine(line) {
   }
 }
 
+// Generic block re-renderer: merges dataOverrides into statusData and replaces the block in DOM
+function rerenderBlock(blockKey, dataOverrides) {
+  if (!statusData) return;
+  const container = document.getElementById('blocks-container');
+  if (!container) return;
+
+  // Merge new data into statusData
+  Object.assign(statusData.data, dataOverrides);
+
+  const blockConfig = BLOCKS[blockKey];
+  if (!blockConfig) return;
+
+  // Find existing block wrapper by matching the block's rendered content
+  const wrappers = container.querySelectorAll('.block-wrapper');
+  for (const wrapper of wrappers) {
+    // Match by checking if this wrapper was rendered by this block config
+    // Use a data attribute for reliable matching
+    if (wrapper.dataset.blockKey === blockKey) {
+      const newBlock = createBlock(blockConfig, statusData.data);
+      newBlock.dataset.blockKey = blockKey;
+      wrapper.replaceWith(newBlock);
+      return;
+    }
+  }
+}
+
 function updateStatusData(status) {
-  // Update storage metrics if present
-  if (status.storage) {
-    // Storage updates can be handled here
-    // For now, these are less frequent so we could re-render the storage block
-  }
+  // 20s tier: network, update state, wifi AP
 
-  // Update network metrics if present
   if (status.network) {
-    const internetEl = document.getElementById('internet-status');
-    if (internetEl) {
-      internetEl.textContent = status.network.upstream_online ? '● Online' : '○ Offline';
-      internetEl.className = status.network.upstream_online ? 'status-online' : 'status-offline';
-    }
+    rerenderBlock('network', { network: status.network });
   }
 
-  // Re-render Updates card with fresh state from server
   if (status.update) {
-    const container = document.getElementById('blocks-container');
-    if (!container) return;
-    // Find existing updates block wrapper
-    const existing = container.querySelector('.block-wrapper:has(.update-version-row)');
-    if (existing) {
-      // Update statusData so the block renders with fresh data
-      if (statusData) statusData.data.update = status.update;
-      const blockConfig = BLOCKS['updates'];
-      const newBlock = createBlock(blockConfig, { ...statusData?.data, update: status.update });
-      existing.replaceWith(newBlock);
+    rerenderBlock('updates', { update: status.update });
+  }
+
+  // WiFi AP: re-render whichever wifi block is visible
+  if (status.wifi_ap !== undefined) {
+    if (statusData) statusData.data.wifi_ap = status.wifi_ap;
+    // Determine which wifi block to show
+    if (status.wifi_ap) {
+      rerenderBlock('wifi-ap', { wifi_ap: status.wifi_ap });
+      // Remove disabled block if present
+      const container = document.getElementById('blocks-container');
+      const disabled = container?.querySelector('[data-block-key="wifi-ap-disabled"]');
+      if (disabled) disabled.remove();
+    } else {
+      rerenderBlock('wifi-ap-disabled', {});
+      const container = document.getElementById('blocks-container');
+      const enabled = container?.querySelector('[data-block-key="wifi-ap"]');
+      if (enabled) enabled.remove();
     }
+  }
+}
+
+function updateSlowData(data) {
+  // 500s tier: storage
+  if (data.storage) {
+    rerenderBlock('storage', { storage: data.storage });
   }
 }
 
 // Initialize dashboard
 document.addEventListener('DOMContentLoaded', async () => {
-  // 1. Initial full render (existing BLOCKS pattern)
+  // 1. Initial full render
   await renderDashboard();
 
   // 2. Fetch initial log level and service status
@@ -1237,7 +1279,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 3. Connect SSE for real-time updates (replaces polling)
   connectEventStream();
 
-  // 4. Periodic syncs
+  // 4. Periodic syncs (service status and log level not in SSE)
   setInterval(fetchLogLevel, 30000);
   setInterval(() => fetchServiceStatus().then(updateServiceStatusUI), 30000);
 });

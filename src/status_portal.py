@@ -519,39 +519,56 @@ def api_logs_stream():
 def api_events():
     """Unified SSE endpoint for dashboard real-time updates.
 
-    Events emitted:
-    - health: Camera/system status (every 5s or on change)
-    - log: New log lines (real-time)
-    - status: Network/storage updates (every 30s)
+    Tiered event intervals to balance responsiveness vs Pi load:
+    - health: every 1s  — health socket, psutil, version (cheap /proc reads)
+    - status: every 20s — network+ping, update state, wifi AP (subprocesses)
+    - slow:   every 500s — storage glob+stat (heavy I/O with many images)
+    - log:    real-time  — tail log file
     """
     def generate():
         log_path = Path('/var/log/sai-cam/camera_service.log')
         last_log_size = log_path.stat().st_size if log_path.exists() else 0
         last_health_hash = None
         last_status_hash = None
+        last_slow_hash = None
         last_health_time = 0
         last_status_time = 0
+        last_slow_time = 0
 
-        # Send initial health immediately
+        # Send initial snapshot immediately
         try:
             health = query_health_socket() or {}
-            # Add system metrics from psutil
             health['system'] = get_system_info()
             health['portal_version'] = VERSION
             yield f"event: health\ndata: {json.dumps(health)}\n\n"
             last_health_hash = hash(json.dumps(health, sort_keys=True))
             last_health_time = time.time()
+
+            status_data = {
+                'network': get_network_info(),
+                'update': get_update_info() if UPDATE_MANAGER_AVAILABLE else None,
+                'wifi_ap': get_wifi_ap_info() if is_wifi_ap_active() else None,
+            }
+            yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
+            last_status_hash = hash(json.dumps(status_data, sort_keys=True))
+            last_status_time = time.time()
+
+            slow_data = {
+                'storage': get_storage_info(),
+            }
+            yield f"event: slow\ndata: {json.dumps(slow_data)}\n\n"
+            last_slow_hash = hash(json.dumps(slow_data, sort_keys=True))
+            last_slow_time = time.time()
         except Exception as e:
-            logger.debug(f"Initial health fetch failed: {e}")
+            logger.debug(f"Initial SSE snapshot failed: {e}")
 
         while True:
             try:
                 now = time.time()
 
-                # Health updates (every 5s, only if changed)
-                if now - last_health_time >= 5:
+                # Fast tier: every 1s (cheap reads: unix socket, /proc, json file)
+                if now - last_health_time >= 1:
                     health = query_health_socket() or {}
-                    # Add system metrics from psutil
                     health['system'] = get_system_info()
                     health['portal_version'] = VERSION
                     health_hash = hash(json.dumps(health, sort_keys=True))
@@ -560,27 +577,40 @@ def api_events():
                         last_health_hash = health_hash
                     last_health_time = now
 
-                # Status updates - network/storage/update (every 30s)
-                if now - last_status_time >= 30:
+                # Medium tier: every 20s (subprocesses: ping, iw, json read)
+                if now - last_status_time >= 20:
                     try:
                         status_data = {
                             'network': get_network_info(),
-                            'storage': get_storage_info(),
                             'update': get_update_info() if UPDATE_MANAGER_AVAILABLE else None,
+                            'wifi_ap': get_wifi_ap_info() if is_wifi_ap_active() else None,
                         }
                         status_hash = hash(json.dumps(status_data, sort_keys=True))
                         if status_hash != last_status_hash:
                             yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
                             last_status_hash = status_hash
                     except Exception as e:
-                        logger.debug(f"Status fetch failed: {e}")
+                        logger.debug(f"Status tier failed: {e}")
                     last_status_time = now
+
+                # Slow tier: every 500s (heavy I/O: glob + stat on images)
+                if now - last_slow_time >= 500:
+                    try:
+                        slow_data = {
+                            'storage': get_storage_info(),
+                        }
+                        slow_hash = hash(json.dumps(slow_data, sort_keys=True))
+                        if slow_hash != last_slow_hash:
+                            yield f"event: slow\ndata: {json.dumps(slow_data)}\n\n"
+                            last_slow_hash = slow_hash
+                    except Exception as e:
+                        logger.debug(f"Slow tier failed: {e}")
+                    last_slow_time = now
 
                 # Log updates (real-time)
                 if log_path.exists():
                     current_size = log_path.stat().st_size
                     if current_size > last_log_size:
-                        # New log content
                         with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                             f.seek(last_log_size)
                             for line in f:
