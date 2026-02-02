@@ -233,6 +233,9 @@ except ImportError:
         done
     fi
 
+    # Ensure git trusts the repo directory (may be owned by a different user)
+    git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+
     # --- Fetch and checkout target tag ---
     log "Fetching tag $TARGET_TAG..."
     cd "$REPO_DIR"
