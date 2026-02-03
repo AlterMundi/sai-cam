@@ -102,13 +102,17 @@ Location: `/var/lib/sai-cam/update-state.json`
 
 ### `release.sh` reference
 
+Current version is derived from git tags (`git describe --tags --abbrev=0`),
+not from `src/version.py`. The script writes `version.py` as a derived
+artifact during release — never edit it by hand.
+
 ```
-./scripts/release.sh              # patch bump (default): 0.2.22 → 0.2.23
-./scripts/release.sh --minor      # minor bump: 0.2.22 → 0.3.0
-./scripts/release.sh --major      # major bump: 0.2.22 → 1.0.0
-./scripts/release.sh --beta       # beta pre-release: 0.2.22 → 0.2.23-beta.1
-./scripts/release.sh --beta       # next beta: 0.2.23-beta.1 → 0.2.23-beta.2
-./scripts/release.sh --promote    # promote beta to stable: 0.2.23-beta.2 → 0.2.23
+./scripts/release.sh              # patch bump (default): 0.2.26 → 0.2.27
+./scripts/release.sh --minor      # minor bump: 0.2.26 → 0.3.0
+./scripts/release.sh --major      # major bump: 0.2.26 → 1.0.0
+./scripts/release.sh --beta       # beta pre-release: 0.2.26 → 0.2.27-beta.1
+./scripts/release.sh --beta       # next beta: 0.2.27-beta.1 → 0.2.27-beta.2
+./scripts/release.sh --promote    # promote beta to stable: 0.2.27-beta.2 → 0.2.27
 ./scripts/release.sh --dry-run    # preview, no changes
 ./scripts/release.sh --force-branch  # skip the "must be on main" check
 ```
@@ -188,6 +192,74 @@ whether an update is available but does not apply it.
 - After 3 consecutive failures, updates are paused until manually cleared
 - Safety nets: `service_watchdog.sh` (cron, every 10min) and daily 4 AM reboot
 
+## Fleet Command API
+
+Remote node control from developer machine. Each node's status portal
+exposes `/api/fleet/*` endpoints; the `fleet.py` CLI drives them in parallel.
+
+### Setup
+
+1. Generate a token: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+2. Add to node config (`/etc/sai-cam/config.yaml`):
+   ```yaml
+   fleet:
+     token: '<generated-token>'
+     allowed_config_keys:
+       - updates.channel
+       - updates.enabled
+       - logging.level
+   ```
+3. Restart portal: `sudo systemctl restart sai-cam-portal`
+4. Add the node to `fleet/nodes.yaml` (copy from `fleet/nodes.yaml.example`)
+
+### Fleet CLI usage
+
+```bash
+./scripts/fleet.py --list                        # Show registry
+./scripts/fleet.py --ping                        # Ping all nodes
+./scripts/fleet.py --update saicam3              # Trigger update on one node
+./scripts/fleet.py --update ALL                  # Trigger update on all nodes
+./scripts/fleet.py --restart saicam1 saicam2     # Restart services
+./scripts/fleet.py --reboot saicam3              # Reboot a node (1 min delay)
+./scripts/fleet.py --set updates.channel=beta saicam3
+./scripts/fleet.py --set logging.level=DEBUG ALL
+./scripts/fleet.py --canary                      # Canary rollout workflow
+```
+
+### Fleet API endpoints
+
+All under `/api/fleet/` on each node's portal (port 8090).
+Require `Authorization: Bearer <token>` except ping.
+
+| Method | Path | Action |
+|--------|------|--------|
+| GET | `/api/fleet/ping` | Version, uptime, node_id (no auth) |
+| POST | `/api/fleet/update/apply` | Trigger `sai-cam-update.service` |
+| POST | `/api/fleet/service/restart` | Restart sai-cam + portal |
+| POST | `/api/fleet/reboot` | Schedule reboot (+1 min) |
+| POST | `/api/fleet/config` | Set whitelisted config key |
+
+### Canary rollout
+
+```bash
+./scripts/fleet.py --canary
+```
+
+1. Pings canary node for baseline version
+2. Triggers update on canary
+3. Polls until version changes (up to 3 min)
+4. Health-checks canary via `/api/status`
+5. Prompts: "Roll to fleet? [y/N]"
+6. If yes, updates all stable nodes in parallel
+7. Prints rollout report table
+
+### Security
+
+- Bearer tokens per node (stored in `fleet/nodes.yaml`, gitignored)
+- Config changes restricted to `fleet.allowed_config_keys` whitelist
+- Sudoers scoped to exact commands (`systemctl restart`, `shutdown -r +1`)
+- Nodes on local mesh network, not internet-exposed
+
 ## Fleet Monitoring
 
 Prometheus metrics (shipped via vmagent):
@@ -195,14 +267,9 @@ Prometheus metrics (shipped via vmagent):
 - `saicam_update_last_check_timestamp` (unix timestamp)
 - `saicam_update_consecutive_failures` (count)
 
-Query all nodes:
+Query all nodes via fleet CLI:
 ```bash
-for node in saicam3.local saicam5.local; do
-    echo -n "$node: "
-    curl -sf "http://$node/api/update/status" | \
-        python3 -c "import sys,json; d=json.load(sys.stdin); print(f'v{d[\"current_version\"]} ({d[\"status\"]})')" \
-        2>/dev/null || echo "UNREACHABLE"
-done
+./scripts/fleet.py --ping
 ```
 
 ## Files
@@ -210,7 +277,13 @@ done
 | File | Purpose |
 |------|---------|
 | `scripts/self-update.sh` | Core update orchestrator |
+| `scripts/release.sh` | Version bump, tag, push (reads version from git tags) |
+| `scripts/fleet.py` | Fleet CLI — remote node control |
 | `src/update_manager.py` | Python state management module |
+| `src/status_portal.py` | Portal API (includes `/api/fleet/*` endpoints) |
+| `fleet/nodes.yaml.example` | Fleet registry template |
+| `fleet/nodes.yaml` | Real fleet registry with tokens (gitignored) |
+| `config/sai-cam-sudoers` | Sudoers rules for fleet operations |
 | `systemd/sai-cam-update.service.template` | Oneshot service for update runs |
 | `systemd/sai-cam-update.timer.template` | Timer: 6h interval, 30min jitter |
 | `/var/lib/sai-cam/update-state.json` | Runtime state (on deployed nodes) |
