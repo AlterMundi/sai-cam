@@ -554,6 +554,19 @@ def _try_write_state(result):
     except OSError as e:
         logger.debug(f'Could not write state file: {e}')
 
+@app.route('/api/update/apply', methods=['POST'])
+def api_update_apply():
+    """Trigger self-update via systemd (local portal button)."""
+    try:
+        subprocess.Popen(
+            ['sudo', 'systemctl', 'start', 'sai-cam-update.service'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return jsonify({'triggered': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/status/cameras')
 def api_cameras():
     """Get camera-specific status"""

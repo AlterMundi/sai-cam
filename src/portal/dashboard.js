@@ -381,7 +381,10 @@ const BLOCKS = {
             ` : ''}
           </div>
           ${u.update_available ? `
-            <div class="update-banner">Update available</div>
+            <div class="update-banner">
+              Update available
+              <button class="btn btn-small btn-primary" onclick="applyUpdate(this)" style="margin-left:8px;font-size:0.85em">Apply now</button>
+            </div>
           ` : ''}
           <div class="update-details">
             <div class="update-detail-row">
@@ -1237,6 +1240,30 @@ function rerenderBlock(blockKey, dataOverrides) {
       wrapper.replaceWith(newBlock);
       return;
     }
+  }
+}
+
+async function applyUpdate(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Updating...';
+  btn.classList.add('btn-loading');
+  try {
+    const resp = await fetch('/api/update/apply', { method: 'POST' });
+    const data = await resp.json();
+    if (resp.ok && data.triggered) {
+      showNotification('Update triggered — node will restart shortly', 'success');
+      btn.textContent = 'Triggered';
+    } else {
+      showNotification(data.error || 'Failed to trigger update', 'error');
+      btn.textContent = 'Apply now';
+      btn.disabled = false;
+      btn.classList.remove('btn-loading');
+    }
+  } catch (e) {
+    showNotification('Network error', 'error');
+    btn.textContent = 'Apply now';
+    btn.disabled = false;
+    btn.classList.remove('btn-loading');
   }
 }
 
