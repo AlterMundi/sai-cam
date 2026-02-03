@@ -1211,7 +1211,25 @@ echo ""
 echo "🌐 Configuring Nginx Proxy"
 echo "--------------------------"
 
-# Install portal nginx configuration (serves portal on port 80)
+# Generate self-signed TLS cert for HTTPS→HTTP redirect (if missing)
+SSL_DIR="/etc/sai-cam/ssl"
+if [ ! -f "$SSL_DIR/portal.crt" ] || [ ! -f "$SSL_DIR/portal.key" ]; then
+    echo "🔒 Generating self-signed TLS certificate for HTTPS redirect..."
+    sudo mkdir -p "$SSL_DIR"
+    sudo openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "$SSL_DIR/portal.key" \
+        -out "$SSL_DIR/portal.crt" \
+        -subj "/CN=sai-cam" \
+        -addext "subjectAltName=DNS:sai-cam.local,DNS:*.sai-cam.local,IP:$AP_IP" \
+        > /dev/null 2>&1
+    sudo chmod 600 "$SSL_DIR/portal.key"
+    sudo chmod 644 "$SSL_DIR/portal.crt"
+    echo "   Certificate generated (valid 10 years, self-signed)"
+else
+    echo "🔒 TLS certificate already exists, skipping generation"
+fi
+
+# Install portal nginx configuration (serves portal on port 80, HTTPS redirect on 443)
 echo "🔧 Installing portal nginx configuration..."
 # Generate config with AP_IP from .env (replaces __AP_IP__ placeholder)
 sed "s/__AP_IP__/$AP_IP/g" "$PROJECT_ROOT/config/portal-nginx.conf" \
