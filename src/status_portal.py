@@ -558,6 +558,12 @@ def _try_write_state(result):
 def api_update_apply():
     """Trigger self-update via systemd (local portal button)."""
     try:
+        # Check if update is already running (systemd oneshot)
+        result = subprocess.run(
+            ['systemctl', 'is-active', '--quiet', 'sai-cam-update.service'],
+        )
+        if result.returncode == 0:
+            return jsonify({'triggered': False, 'error': 'Update already in progress'}), 409
         subprocess.Popen(
             ['sudo', 'systemctl', 'start', 'sai-cam-update.service'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -1265,6 +1271,11 @@ def api_fleet_ping():
 def api_fleet_update_apply():
     """Trigger self-update via systemd unit (runs async)."""
     try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', '--quiet', 'sai-cam-update.service'],
+        )
+        if result.returncode == 0:
+            return jsonify({'triggered': False, 'error': 'Update already in progress'}), 409
         subprocess.Popen(
             ['sudo', 'systemctl', 'start', 'sai-cam-update.service'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
