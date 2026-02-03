@@ -1,0 +1,23 @@
+# Fleet Registry — one entry per SAI-Cam node
+# Copy to nodes.yaml and fill in real tokens.
+# Generate tokens with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+# Each token must match the fleet.token value in that node's /etc/sai-cam/config.yaml
+
+nodes:
+  - name: saicam1
+    host: saicam1.local
+    port: 8090
+    token: "<token>"          # Must match fleet.token in node's config.yaml
+    role: stable              # stable | canary
+
+  - name: saicam2
+    host: saicam2.local
+    port: 8090
+    token: "<token>"
+    role: stable
+
+  - name: saicam3
+    host: saicam3.local
+    port: 8090
+    token: "<token>"
+    role: canary              # First to receive updates

@@ -195,5 +195,8 @@ scripts/*prod*
 config/config.yaml
 CLAUDE.md
 
+# Fleet registry with real tokens
+fleet/nodes.yaml
+
 # Monitoring secrets
 monitoring/.env

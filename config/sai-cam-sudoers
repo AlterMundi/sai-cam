@@ -11,3 +11,9 @@ admin ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down sai-cam-ap
 # Self-update: allow triggering update check and viewing status
 admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl start sai-cam-update.service
 admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl status sai-cam-update
+
+# Fleet operations: service restart and reboot
+admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart sai-cam sai-cam-portal
+admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart sai-cam
+admin ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart sai-cam-portal
+admin ALL=(ALL) NOPASSWD: /usr/sbin/shutdown -r +1 Fleet reboot

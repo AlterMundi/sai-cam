@@ -5,6 +5,7 @@ Lightweight Flask API providing node health and status information
 """
 
 import copy
+from functools import wraps
 import json
 import logging
 import os
@@ -1214,6 +1215,140 @@ def prometheus_metrics():
 
     _update_prometheus_metrics()
     return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
+
+# ========================================
+# Fleet API — remote node control
+# ========================================
+
+def fleet_auth_required(f):
+    """Decorator: check Bearer token against config fleet.token."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = config.get('fleet', {}).get('token', '')
+        if not token:
+            return jsonify({'error': 'Fleet API not configured'}), 503
+        auth = request.headers.get('Authorization', '')
+        if auth != f'Bearer {token}':
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route('/api/fleet/ping')
+def api_fleet_ping():
+    """Fleet discovery — no auth required (like /api/status)."""
+    return jsonify({
+        'ok': True,
+        'version': VERSION,
+        'uptime': int(time.time() - start_time),
+        'node_id': config.get('device', {}).get('id', 'unknown'),
+        'timestamp': datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/fleet/update/apply', methods=['POST'])
+@fleet_auth_required
+def api_fleet_update_apply():
+    """Trigger self-update via systemd unit (runs async)."""
+    try:
+        subprocess.Popen(
+            ['sudo', 'systemctl', 'start', 'sai-cam-update.service'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return jsonify({'triggered': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/fleet/service/restart', methods=['POST'])
+@fleet_auth_required
+def api_fleet_service_restart():
+    """Restart sai-cam + sai-cam-portal services.
+
+    Portal restarts itself, so fire-and-forget with Popen.
+    """
+    try:
+        subprocess.Popen(
+            ['sudo', 'systemctl', 'restart', 'sai-cam', 'sai-cam-portal'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return jsonify({'triggered': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/fleet/reboot', methods=['POST'])
+@fleet_auth_required
+def api_fleet_reboot():
+    """Schedule node reboot in 1 minute (gives response time)."""
+    try:
+        subprocess.Popen(
+            ['sudo', '/usr/sbin/shutdown', '-r', '+1', 'Fleet reboot'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return jsonify({'scheduled': True, 'delay': '1 min'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/fleet/config', methods=['POST'])
+@fleet_auth_required
+def api_fleet_config():
+    """Write a whitelisted key-value pair into config.yaml.
+
+    Accepts JSON: {"key": "updates.channel", "value": "beta"}
+    """
+    data = request.get_json(silent=True)
+    if not data or 'key' not in data or 'value' not in data:
+        return jsonify({'error': 'JSON body with key and value required'}), 400
+
+    key = data['key']
+    value = data['value']
+
+    allowed = config.get('fleet', {}).get('allowed_config_keys',
+                ['updates.channel', 'updates.enabled', 'logging.level'])
+    if key not in allowed:
+        return jsonify({'error': f'Key not allowed: {key}', 'allowed': allowed}), 403
+
+    config_path = Path(app.config.get('CONFIG_PATH', '/etc/sai-cam/config.yaml'))
+    try:
+        with open(config_path, 'r') as f:
+            cfg = yaml.safe_load(f)
+
+        # Traverse dotted key (e.g. "updates.channel") and set value
+        parts = key.split('.')
+        node = cfg
+        for part in parts[:-1]:
+            if part not in node or not isinstance(node[part], dict):
+                node[part] = {}
+            node = node[part]
+        node[parts[-1]] = value
+
+        with open(config_path, 'w') as f:
+            yaml.dump(cfg, f, default_flow_style=False)
+
+        # Reload in-memory config
+        load_config(str(config_path))
+
+        # If logging.level changed, SIGHUP camera service to pick it up
+        if key == 'logging.level':
+            try:
+                result = subprocess.run(
+                    ['pgrep', '-f', 'camera_service.py'],
+                    capture_output=True, text=True,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    pid = int(result.stdout.strip().split()[0])
+                    os.kill(pid, signal.SIGHUP)
+            except Exception:
+                pass  # Best effort
+
+        return jsonify({'ok': True, 'key': key, 'value': value})
+    except PermissionError:
+        return jsonify({'error': 'Permission denied writing config'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 def main():

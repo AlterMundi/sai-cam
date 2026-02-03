@@ -129,6 +129,14 @@ updates:
   channel: 'stable'        # 'stable' (releases only) or 'beta' (includes pre-releases)
   apply_immediately: true   # true = restart now, false = wait for daily reboot
 
+# Fleet Management (optional - enables remote control API)
+fleet:
+  token: ''                  # Bearer token for fleet API (generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+  allowed_config_keys:       # Keys that can be changed remotely via /api/fleet/config
+    - updates.channel
+    - updates.enabled
+    - logging.level
+
 # WiFi Access Point Configuration (optional - auto-enabled if wlan0 exists)
 wifi_ap:
   enabled: auto            # auto = enable if hardware present, true/false to force
