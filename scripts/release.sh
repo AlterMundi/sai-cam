@@ -55,13 +55,12 @@ run() {
     fi
 }
 
-# ── Read current version ─────────────────────────────────────────────
-[[ -f "$VERSION_FILE" ]] || die "Version file not found: $VERSION_FILE"
+# ── Read current version from git tags (single source of truth) ──────
+CURRENT_TAG=$(git -C "$REPO_ROOT" describe --tags --abbrev=0 2>/dev/null) \
+    || die "No git tags found. Create an initial tag: git tag -a v0.0.0 -m 'Initial'"
+CURRENT_VERSION="${CURRENT_TAG#v}"
 
-CURRENT_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' "$VERSION_FILE") \
-    || die "Could not parse VERSION from $VERSION_FILE"
-
-info "Current version: $CURRENT_VERSION"
+info "Current version: $CURRENT_VERSION (from tag $CURRENT_TAG)"
 
 # ── Parse version components ─────────────────────────────────────────
 # Matches: 1.2.3, 1.2.3-beta.4, 1.2.3-rc.1, etc.
