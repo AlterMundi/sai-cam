@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Pre-push hook: run smoke tests before pushing to remote.
+# Install: git config core.hooksPath .githooks
+# Bypass:  git push --no-verify
+
+set -euo pipefail
+
+echo "Running smoke tests before push..."
+
+if ! command -v pytest &>/dev/null; then
+    echo "WARNING: pytest not found, skipping smoke tests"
+    exit 0
+fi
+
+if pytest -m smoke -q --tb=line 2>/dev/null; then
+    echo "Smoke tests passed."
+else
+    echo ""
+    echo "PUSH BLOCKED: smoke tests failed."
+    echo "Fix the failing tests or use 'git push --no-verify' to bypass."
+    exit 1
+fi
