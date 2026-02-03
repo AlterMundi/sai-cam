@@ -446,3 +446,469 @@ class TestServiceStatus:
         resp = client.get('/api/service/status')
         data = resp.get_json()
         assert data['active'] is False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _tail_file helper
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestTailFile:
+
+    def test_tail_file_returns_last_lines(self, tmp_path):
+        log_file = tmp_path / "test.log"
+        log_file.write_text("\n".join([f"line{i}" for i in range(100)]))
+
+        result = status_portal._tail_file(log_file, lines=10)
+        assert len(result) == 10
+        assert result[-1] == "line99"
+
+    def test_tail_file_empty_file(self, tmp_path):
+        log_file = tmp_path / "empty.log"
+        log_file.write_text("")
+
+        result = status_portal._tail_file(log_file, lines=10)
+        assert result == []
+
+    def test_tail_file_missing_file(self, tmp_path):
+        missing = tmp_path / "missing.log"
+        result = status_portal._tail_file(missing, lines=10)
+        assert result == []
+
+    def test_tail_file_fewer_lines_than_requested(self, tmp_path):
+        log_file = tmp_path / "small.log"
+        log_file.write_text("line1\nline2\nline3\n")
+
+        result = status_portal._tail_file(log_file, lines=10)
+        assert len(result) == 3
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fleet Auth
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestFleetAuth:
+
+    def test_fleet_auth_rejects_missing_token(self, client):
+        status_portal.config['fleet'] = {'token': 'secret-token'}
+        resp = client.post('/api/fleet/service/restart')
+        assert resp.status_code == 401
+
+    def test_fleet_auth_rejects_wrong_token(self, client):
+        status_portal.config['fleet'] = {'token': 'secret-token'}
+        resp = client.post('/api/fleet/service/restart',
+                          headers={'Authorization': 'Bearer wrong-token'})
+        assert resp.status_code == 401
+
+    def test_fleet_auth_rejects_when_not_configured(self, client):
+        status_portal.config['fleet'] = {}
+        resp = client.post('/api/fleet/service/restart',
+                          headers={'Authorization': 'Bearer any'})
+        assert resp.status_code == 503
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fleet Routes
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestFleetRoutes:
+
+    def test_fleet_ping_no_auth_required(self, client):
+        """Ping is public for discovery."""
+        resp = client.get('/api/fleet/ping')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['ok'] is True
+        assert 'version' in data
+        assert 'node_id' in data
+
+    @patch("status_portal.subprocess")
+    def test_fleet_update_apply_success(self, mock_subprocess, client):
+        status_portal.config['fleet'] = {'token': 'tok'}
+        # is-active returns non-zero (not running)
+        mock_subprocess.run.return_value = MagicMock(returncode=3)
+        mock_subprocess.Popen = MagicMock()
+        mock_subprocess.DEVNULL = -1
+
+        resp = client.post('/api/fleet/update/apply',
+                          headers={'Authorization': 'Bearer tok'})
+        assert resp.status_code == 200
+        assert resp.get_json()['triggered'] is True
+
+    @patch("status_portal.subprocess")
+    def test_fleet_update_apply_already_running(self, mock_subprocess, client):
+        status_portal.config['fleet'] = {'token': 'tok'}
+        mock_subprocess.run.return_value = MagicMock(returncode=0)
+
+        resp = client.post('/api/fleet/update/apply',
+                          headers={'Authorization': 'Bearer tok'})
+        assert resp.status_code == 409
+
+    @patch("status_portal.subprocess")
+    def test_fleet_service_restart(self, mock_subprocess, client):
+        status_portal.config['fleet'] = {'token': 'tok'}
+        mock_subprocess.Popen = MagicMock()
+        mock_subprocess.DEVNULL = -1
+
+        resp = client.post('/api/fleet/service/restart',
+                          headers={'Authorization': 'Bearer tok'})
+        assert resp.status_code == 200
+        assert resp.get_json()['triggered'] is True
+
+    @patch("status_portal.subprocess")
+    def test_fleet_reboot(self, mock_subprocess, client):
+        status_portal.config['fleet'] = {'token': 'tok'}
+        mock_subprocess.Popen = MagicMock()
+        mock_subprocess.DEVNULL = -1
+
+        resp = client.post('/api/fleet/reboot',
+                          headers={'Authorization': 'Bearer tok'})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['scheduled'] is True
+        assert data['delay'] == '1 min'
+
+    @patch("status_portal.yaml")
+    def test_fleet_config_allowed_key(self, mock_yaml, client, tmp_path):
+        status_portal.config['fleet'] = {
+            'token': 'tok',
+            'allowed_config_keys': ['updates.channel', 'logging.level']
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("updates:\n  channel: stable\n")
+        app.config['CONFIG_PATH'] = str(config_file)
+        mock_yaml.safe_load.return_value = {'updates': {'channel': 'stable'}}
+
+        with patch("builtins.open", MagicMock()):
+            resp = client.post('/api/fleet/config',
+                              headers={'Authorization': 'Bearer tok'},
+                              json={'key': 'updates.channel', 'value': 'beta'},
+                              content_type='application/json')
+        assert resp.status_code == 200
+        assert resp.get_json()['ok'] is True
+
+    def test_fleet_config_forbidden_key(self, client):
+        status_portal.config['fleet'] = {
+            'token': 'tok',
+            'allowed_config_keys': ['updates.channel']
+        }
+
+        resp = client.post('/api/fleet/config',
+                          headers={'Authorization': 'Bearer tok'},
+                          json={'key': 'server.auth_token', 'value': 'hacked'},
+                          content_type='application/json')
+        assert resp.status_code == 403
+
+    def test_fleet_config_missing_body(self, client):
+        status_portal.config['fleet'] = {'token': 'tok'}
+
+        resp = client.post('/api/fleet/config',
+                          headers={'Authorization': 'Bearer tok'},
+                          content_type='application/json')
+        assert resp.status_code == 400
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Health Sub-Routes
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestHealthSubRoutes:
+
+    @patch("status_portal.query_health_socket")
+    def test_health_cameras_returns_camera_data(self, mock_socket, client):
+        mock_socket.return_value = {
+            'cameras': {'cam1': {'state': 'healthy'}},
+            'failed_cameras': {},
+            'timestamp': '2026-01-01T00:00:00',
+        }
+        resp = client.get('/api/health/cameras')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert 'cameras' in data
+        assert 'cam1' in data['cameras']
+
+    @patch("status_portal.query_health_socket")
+    def test_health_cameras_503_when_unavailable(self, mock_socket, client):
+        mock_socket.return_value = None
+        resp = client.get('/api/health/cameras')
+        assert resp.status_code == 503
+
+    @patch("status_portal.query_health_socket")
+    def test_health_threads_returns_thread_data(self, mock_socket, client):
+        mock_socket.return_value = {
+            'threads': {'total': 2, 'alive': 2},
+            'timestamp': '2026-01-01T00:00:00',
+        }
+        resp = client.get('/api/health/threads')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert 'threads' in data
+        assert data['threads']['total'] == 2
+
+    @patch("status_portal.query_health_socket")
+    def test_health_threads_503_when_unavailable(self, mock_socket, client):
+        mock_socket.return_value = None
+        resp = client.get('/api/health/threads')
+        assert resp.status_code == 503
+
+    @patch("status_portal.query_health_socket")
+    def test_health_system_returns_system_data(self, mock_socket, client):
+        mock_socket.return_value = {
+            'system': {'cpu_percent': 10, 'memory_percent': 30},
+            'health_monitor': {'check_count': 5},
+            'uptime_seconds': 3600,
+            'version': '0.2.9',
+            'timestamp': '2026-01-01T00:00:00',
+        }
+        resp = client.get('/api/health/system')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert 'system' in data
+        assert data['system']['cpu_percent'] == 10
+
+    @patch("status_portal.query_health_socket")
+    def test_health_system_503_when_unavailable(self, mock_socket, client):
+        mock_socket.return_value = None
+        resp = client.get('/api/health/system')
+        assert resp.status_code == 503
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Log Level Routes
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestLogLevelRoutes:
+
+    def test_get_log_level(self, client):
+        status_portal.config['logging'] = {'level': 'INFO'}
+        resp = client.get('/api/log_level')
+        assert resp.status_code == 200
+        assert resp.get_json()['level'] == 'INFO'
+
+    def test_get_log_level_default(self, client):
+        status_portal.config.pop('logging', None)
+        resp = client.get('/api/log_level')
+        assert resp.status_code == 200
+        assert resp.get_json()['level'] == 'WARNING'
+
+    def test_set_log_level_invalid(self, client):
+        resp = client.post('/api/log_level',
+                          json={'level': 'TRACE'},
+                          content_type='application/json')
+        assert resp.status_code == 400
+
+    @patch("status_portal.subprocess")
+    @patch("status_portal.os.kill")
+    @patch("status_portal.load_config")
+    def test_set_log_level_success(self, mock_load, mock_kill, mock_subprocess, client, tmp_path):
+        """Test setting log level (integration-style with real temp file)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("logging:\n  level: 'WARNING'\n")
+
+        mock_subprocess.run.return_value = MagicMock(returncode=0, stdout='12345\n')
+
+        # Patch Path to point to our temp file
+        original_path = status_portal.Path
+
+        def patched_path(p):
+            if p == '/etc/sai-cam/config.yaml':
+                return original_path(config_file)
+            return original_path(p)
+
+        with patch.object(status_portal, 'Path', side_effect=patched_path):
+            resp = client.post('/api/log_level',
+                              json={'level': 'DEBUG'},
+                              content_type='application/json')
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+        assert data['level'] == 'DEBUG'
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# WiFi AP Routes
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestWifiApRoutes:
+
+    @patch("status_portal.subprocess")
+    def test_wifi_enable_success(self, mock_subprocess, client):
+        mock_subprocess.run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+        mock_subprocess.TimeoutExpired = Exception
+
+        resp = client.post('/api/wifi_ap/enable')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+
+    @patch("status_portal.subprocess")
+    def test_wifi_enable_failure(self, mock_subprocess, client):
+        mock_subprocess.run.return_value = MagicMock(returncode=1, stdout='', stderr='connection failed')
+        mock_subprocess.TimeoutExpired = Exception
+
+        resp = client.post('/api/wifi_ap/enable')
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert data['success'] is False
+
+    @patch("status_portal.subprocess")
+    def test_wifi_disable_success(self, mock_subprocess, client):
+        mock_subprocess.run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+        mock_subprocess.TimeoutExpired = Exception
+
+        resp = client.post('/api/wifi_ap/disable')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+
+    @patch("status_portal.subprocess")
+    def test_wifi_disable_timeout(self, mock_subprocess, client):
+        mock_subprocess.run.side_effect = Exception("timeout")  # simulating TimeoutExpired
+        mock_subprocess.TimeoutExpired = Exception
+
+        resp = client.post('/api/wifi_ap/disable')
+        assert resp.status_code == 500
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# api_logs bounds
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestApiLogsBounds:
+
+    @patch("status_portal.get_recent_logs", return_value=["line1"])
+    def test_logs_negative_clamped(self, mock_logs, client):
+        resp = client.get('/api/logs?lines=-10')
+        assert resp.status_code == 200
+        mock_logs.assert_called_with(1)  # Clamped to 1
+
+    @patch("status_portal.get_recent_logs", return_value=["line1"])
+    def test_logs_huge_clamped(self, mock_logs, client):
+        resp = client.get('/api/logs?lines=99999')
+        assert resp.status_code == 200
+        mock_logs.assert_called_with(1000)  # Clamped to 1000
+
+    @patch("status_portal.get_recent_logs", return_value=["line1"])
+    def test_logs_invalid_uses_default(self, mock_logs, client):
+        resp = client.get('/api/logs?lines=not_a_number')
+        assert resp.status_code == 200
+        mock_logs.assert_called_with(50)  # Default
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# api_latest_image
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestApiLatestImage:
+
+    @patch("status_portal.Path")
+    def test_latest_image_storage_not_found(self, MockPath, client):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = False
+        MockPath.return_value = mock_path
+
+        resp = client.get('/api/images/cam1/latest')
+        assert resp.status_code == 404
+
+    @patch("status_portal.Path")
+    def test_latest_image_no_images(self, MockPath, client):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.glob.return_value = []
+        # uploaded subpath
+        uploaded = MagicMock()
+        uploaded.exists.return_value = True
+        uploaded.glob.return_value = []
+        mock_path.__truediv__ = lambda self, x: uploaded
+        MockPath.return_value = mock_path
+
+        resp = client.get('/api/images/cam1/latest')
+        assert resp.status_code == 404
+
+    @patch("status_portal.send_from_directory")
+    @patch("status_portal.Path")
+    def test_latest_image_found(self, MockPath, mock_send, client):
+        # Create mock image file
+        mock_img = MagicMock()
+        mock_img.name = 'cam1_2026-01-01_00-00-00.jpg'
+        mock_img.parent = Path('/opt/sai-cam/storage')
+        mock_stat = MagicMock()
+        mock_stat.st_mtime = 1000
+        mock_img.stat.return_value = mock_stat
+
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.glob.return_value = [mock_img]
+
+        uploaded = MagicMock()
+        uploaded.exists.return_value = False
+        mock_path.__truediv__ = lambda self, x: uploaded
+
+        MockPath.return_value = mock_path
+        mock_send.return_value = "image data"
+
+        resp = client.get('/api/images/cam1/latest')
+        # Should call send_from_directory
+        mock_send.assert_called_once()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# query_health_socket
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestQueryHealthSocket:
+
+    @patch("status_portal.os.path.exists")
+    def test_socket_not_found(self, mock_exists):
+        mock_exists.return_value = False
+        result = status_portal.query_health_socket()
+        assert result is None
+
+    @patch("status_portal.socket")
+    @patch("status_portal.os.path.exists")
+    def test_socket_connection_error(self, mock_exists, mock_socket_mod):
+        mock_exists.return_value = True
+        mock_socket = MagicMock()
+        mock_socket.connect.side_effect = ConnectionRefusedError("refused")
+        mock_socket_mod.socket.return_value = mock_socket
+        mock_socket_mod.AF_UNIX = 1
+        mock_socket_mod.SOCK_STREAM = 1
+
+        result = status_portal.query_health_socket()
+        assert result is None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# send_camera_command
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestSendCameraCommand:
+
+    @patch("status_portal.os.path.exists")
+    def test_socket_not_found(self, mock_exists):
+        mock_exists.return_value = False
+        result = status_portal.send_camera_command('restart_camera', 'cam1')
+        assert result is None
+
+    @patch("status_portal.socket")
+    @patch("status_portal.os.path.exists")
+    def test_socket_error_returns_error_dict(self, mock_exists, mock_socket_mod):
+        mock_exists.return_value = True
+        mock_socket = MagicMock()
+        mock_socket.connect.side_effect = ConnectionRefusedError("refused")
+        mock_socket_mod.socket.return_value = mock_socket
+        mock_socket_mod.AF_UNIX = 1
+        mock_socket_mod.SOCK_STREAM = 1
+
+        result = status_portal.send_camera_command('restart_camera', 'cam1')
+        assert 'error' in result

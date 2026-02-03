@@ -8,8 +8,10 @@ Nodes and tokens are read from fleet/nodes.yaml (or --registry path).
 Usage:
     ./scripts/fleet.py --ping                        # Ping all nodes
     ./scripts/fleet.py --list                        # Show registry
-    ./scripts/fleet.py --update saicam3              # Trigger update on one node
-    ./scripts/fleet.py --update ALL                  # Trigger update on all nodes
+    ./scripts/fleet.py --status                      # Show update status of all nodes
+    ./scripts/fleet.py --status saicam1              # Show status of one node
+    ./scripts/fleet.py --update saicam3              # Update + poll until done
+    ./scripts/fleet.py --update --no-wait ALL        # Fire-and-forget update
     ./scripts/fleet.py --restart saicam1 saicam2     # Restart services
     ./scripts/fleet.py --reboot saicam3              # Reboot a node
     ./scripts/fleet.py --set updates.channel=beta saicam3
@@ -151,23 +153,111 @@ class FleetCLI:
                 print(f"  {ok(f'{name:<14}')} v{v}  up {up}  ({nid})")
         print()
 
-    def cmd_update(self, names):
-        """Trigger update on specified nodes."""
+    def cmd_update(self, names, wait=True):
+        """Trigger update on specified nodes, optionally poll for completion."""
         nodes = self.resolve_nodes(names)
         print(f"\n{BOLD}Triggering update on {len(nodes)} node(s)…{RESET}\n")
+
+        # Capture pre-update versions
+        pre_versions = {}
+
+        def get_version(node):
+            resp = self._get(node, '/api/fleet/ping')
+            resp.raise_for_status()
+            return resp.json().get('version', '?')
+
+        ver_results = self.parallel(nodes, get_version)
+        for node, result in ver_results:
+            if not isinstance(result, Exception):
+                pre_versions[node['name']] = result
 
         def trigger(node):
             resp = self._request(node, 'POST', '/api/fleet/update/apply')
             resp.raise_for_status()
             return resp.json()
 
-        results = self.parallel(nodes, trigger)
-        for node, result in results:
+        trigger_results = self.parallel(nodes, trigger)
+        triggered = []
+        for node, result in trigger_results:
             name = node['name']
             if isinstance(result, Exception):
                 print(f"  {fail(name)} {result}")
             else:
                 print(f"  {ok(name)} update triggered")
+                triggered.append(node)
+
+        if not wait or not triggered:
+            print()
+            return
+
+        # Poll for completion
+        print(f"\n  Waiting for updates to complete…", end='', flush=True)
+        timeout = 180
+        poll_interval = 10
+        deadline = time.time() + timeout
+        final_status = {}  # name → status dict
+
+        time.sleep(5)  # brief pause before first poll
+        while time.time() < deadline:
+            remaining = [n for n in triggered if n['name'] not in final_status]
+            if not remaining:
+                break
+
+            def poll(node):
+                return _get_update_status(self, node)
+
+            results = self.parallel(remaining, poll)
+            for node, result in results:
+                name = node['name']
+                if isinstance(result, Exception):
+                    sys.stdout.write('x')
+                    sys.stdout.flush()
+                    continue
+                status = result['status']
+                old_ver = pre_versions.get(name, '?')
+                new_ver = result['version']
+                # Terminal success: version changed
+                if new_ver != old_ver and new_ver != '?':
+                    final_status[name] = result
+                    sys.stdout.write(f"{GREEN}✓{RESET}")
+                    sys.stdout.flush()
+                # Terminal failure
+                elif status in _TERMINAL_STATES:
+                    final_status[name] = result
+                    sys.stdout.write(f"{RED}✗{RESET}")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write('.')
+                    sys.stdout.flush()
+
+            if [n for n in triggered if n['name'] not in final_status]:
+                time.sleep(poll_interval)
+        print()
+
+        # Mark timed-out nodes
+        for node in triggered:
+            if node['name'] not in final_status:
+                final_status[node['name']] = {
+                    'version': '?', 'status': 'timeout',
+                    'channel': '?', 'failures': 0, 'last_update': None,
+                }
+
+        # Summary table
+        print(f"\n{BOLD}Update Summary{RESET}\n")
+        print(f"  {'Node':<14} {'Before':<12} {'After':<12} {'Status':<16}")
+        print(f"  {'─'*14} {'─'*12} {'─'*12} {'─'*16}")
+        for node in triggered:
+            name = node['name']
+            old = pre_versions.get(name, '?')
+            info = final_status.get(name, {})
+            new = info.get('version', '?')
+            status = info.get('status', '?')
+            if new != old and new != '?':
+                print(f"  {name:<14} {old:<12} {new:<12} {GREEN}updated{RESET}")
+            elif status == 'timeout':
+                print(f"  {name:<14} {old:<12} {'?':<12} {YELLOW}timeout{RESET}")
+            else:
+                print(f"  {name:<14} {old:<12} {new:<12} {_color_status(status)}")
         print()
 
     def cmd_restart(self, names):
@@ -364,6 +454,34 @@ class FleetCLI:
                 print(f"  {name:<14} {old:<12} {'?':<12} {YELLOW}pending{RESET}")
         print()
 
+    def cmd_status(self, names):
+        """Show update status of nodes."""
+        nodes = self.resolve_nodes(names)
+        print(f"\n{BOLD}Fleet Status{RESET} ({len(nodes)} nodes)\n")
+
+        def fetch(node):
+            return _get_update_status(self, node)
+
+        results = self.parallel(nodes, fetch)
+        results.sort(key=lambda x: x[0]['name'])
+
+        print(f"  {'Node':<14} {'Version':<12} {'Status':<16} {'Channel':<10} {'Failures':>8}  {'Last Update':<10}")
+        print(f"  {'─'*14} {'─'*12} {'─'*16} {'─'*10} {'─'*8}  {'─'*10}")
+        for node, result in results:
+            name = node['name']
+            if isinstance(result, Exception):
+                print(f"  {name:<14} {RED}{'unreachable':<12}{RESET} {'--':<16} {'--':<10} {'--':>8}  {'--'}")
+            else:
+                version = result['version']
+                status = result['status']
+                channel = result['channel']
+                failures = result['failures']
+                last = _fmt_relative_time(result['last_update'])
+                fail_str = str(failures) if failures else '0'
+                fail_colored = f"{RED}{fail_str}{RESET}" if failures else fail_str
+                print(f"  {name:<14} {version:<12} {_color_status(status):<27} {channel:<10} {fail_colored:>19}  {last}")
+        print()
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -399,6 +517,64 @@ def _poll_version_change(cli, node, old_version, timeout=180):
     return None
 
 
+def _get_update_status(cli, node):
+    """Fetch /api/status and extract update info.
+    Returns dict with version, status, channel, failures, last_update_ago.
+    """
+    resp = cli._get(node, '/api/status')
+    resp.raise_for_status()
+    data = resp.json().get('data', {})
+    update = data.get('update', {})
+    return {
+        'version': update.get('current_version', '?'),
+        'status': update.get('status', '?'),
+        'channel': update.get('channel', '?'),
+        'failures': update.get('consecutive_failures', 0),
+        'last_update': update.get('last_update'),
+    }
+
+
+def _fmt_relative_time(iso_str):
+    """Format an ISO timestamp as relative time (e.g. '2m ago', '1h ago')."""
+    if not iso_str:
+        return '--'
+    try:
+        from datetime import datetime, timezone
+        # Parse ISO format, handle both Z suffix and +00:00
+        ts = iso_str.replace('Z', '+00:00')
+        dt = datetime.fromisoformat(ts)
+        now = datetime.now(timezone.utc)
+        delta = (now - dt).total_seconds()
+        if delta < 0:
+            return 'just now'
+        if delta < 60:
+            return f"{int(delta)}s ago"
+        if delta < 3600:
+            return f"{int(delta // 60)}m ago"
+        if delta < 86400:
+            return f"{int(delta // 3600)}h ago"
+        return f"{int(delta // 86400)}d ago"
+    except (ValueError, TypeError):
+        return '--'
+
+
+_TERMINAL_STATES = {
+    'preflight_failed', 'rollback_completed', 'rollback_failed',
+    'check_failed', 'fetch_failed',
+}
+
+
+def _color_status(status):
+    """Color-code an update status string."""
+    if status in ('up_to_date', 'updated'):
+        return f"{GREEN}{status}{RESET}"
+    if status in ('updating', 'checking', 'fetching', 'applying'):
+        return f"{YELLOW}{status}{RESET}"
+    if status in _TERMINAL_STATES:
+        return f"{RED}{status}{RESET}"
+    return status
+
+
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 def main():
@@ -407,8 +583,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""examples:
   %(prog)s --ping                             Ping all nodes
-  %(prog)s --update saicam3                   Update one node
-  %(prog)s --update ALL                       Update all nodes
+  %(prog)s --status                           Show update status of all nodes
+  %(prog)s --update saicam3                   Update node and wait for completion
+  %(prog)s --update --no-wait ALL             Trigger update without polling
   %(prog)s --restart saicam1 saicam2          Restart services
   %(prog)s --reboot saicam3                   Reboot a node
   %(prog)s --set updates.channel=beta saicam3 Set config key
@@ -429,8 +606,12 @@ def main():
                         help='Reboot nodes (or ALL)')
     parser.add_argument('--set', nargs='+', metavar=('KEY=VALUE', 'NODE'),
                         help='Set config key on nodes (e.g. --set updates.channel=beta saicam3)')
+    parser.add_argument('--status', nargs='*', metavar='NODE',
+                        help='Show update status of nodes (or ALL)')
     parser.add_argument('--canary', action='store_true',
                         help='Canary rollout: update canary → verify → roll to fleet')
+    parser.add_argument('--no-wait', action='store_true', dest='no_wait',
+                        help="Don't poll after --update, just trigger and exit")
 
     args = parser.parse_args()
 
@@ -449,8 +630,10 @@ def main():
         cli.cmd_list()
     elif args.ping:
         cli.cmd_ping()
+    elif args.status is not None:
+        cli.cmd_status(args.status or ['ALL'])
     elif args.update is not None:
-        cli.cmd_update(args.update or ['ALL'])
+        cli.cmd_update(args.update or ['ALL'], wait=not args.no_wait)
     elif args.restart is not None:
         cli.cmd_restart(args.restart or ['ALL'])
     elif args.reboot is not None:
