@@ -1474,11 +1474,11 @@ import yaml, sys
 try:
     with open('$PROJECT_ROOT/config/config.yaml') as f:
         c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_url', 'https://netmaker.altermundi.net/vmwrite'))
+    print(c.get('metrics', {}).get('remote_write_url', 'https://grafana2.altermundi.net/vmwrite'))
 except Exception:
-    print('https://netmaker.altermundi.net/vmwrite')
+    print('https://grafana2.altermundi.net/vmwrite')
 " 2>/dev/null)
-        REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://netmaker.altermundi.net/vmwrite"}
+        REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://grafana2.altermundi.net/vmwrite"}
 
         REMOTE_WRITE_USER=$(python3 -c "
 import yaml, sys

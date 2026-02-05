@@ -103,7 +103,7 @@ advanced:
 # Metrics / Monitoring (optional)
 metrics:
   enabled: true
-  remote_write_url: 'https://netmaker.altermundi.net/vmwrite'
+  remote_write_url: 'https://grafana2.altermundi.net/vmwrite'
   remote_write_user: 'vmwriter'
   remote_write_password: 'sr417iUM1btwvaOrTtbd'
 
