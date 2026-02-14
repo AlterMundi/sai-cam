@@ -120,3 +120,17 @@ wifi_ap:
   password: 'saicam123'    # WiFi password (minimum 8 characters)
   channel: 6               # WiFi channel (1-11)
   country_code: 'AR'       # Country code for regulatory compliance
+
+# Self-Update Configuration (optional)
+updates:
+  enabled: true            # Enable automatic self-updates
+  channel: 'stable'        # 'stable' (releases only) or 'beta' (includes pre-releases)
+  apply_immediately: true   # true = restart now, false = wait for daily reboot
+
+# Fleet Management (optional - enables remote control API)
+fleet:
+  token: ''                  # Bearer token for fleet API (generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+  allowed_config_keys:       # Keys that can be changed remotely via /api/fleet/config
+    - updates.channel
+    - updates.enabled
+    - logging.level

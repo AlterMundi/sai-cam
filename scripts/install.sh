@@ -241,6 +241,173 @@ read_config_value() {
     fi
 }
 
+# Function to merge missing config sections into production config.
+# Ensures fleet, updates, portal, wifi_ap sections exist in production config.
+# Auto-generates fleet.token if missing or empty.
+# Uses config.yaml.example as the source of default section text (with comments).
+# Idempotent: only appends sections that are missing.
+merge_missing_config_sections() {
+    local prod_config="$CONFIG_DIR/config.yaml"
+    local example_config="$PROJECT_ROOT/config/config.yaml.example"
+    local venv_python="$INSTALL_DIR/venv/bin/python3"
+
+    if [ ! -f "$prod_config" ]; then
+        echo "⚠️  No production config to merge into — skipping config merge"
+        return 0
+    fi
+
+    if [ ! -f "$example_config" ]; then
+        echo "⚠️  Example config not found at $example_config — skipping config merge"
+        return 0
+    fi
+
+    # Use venv python (has PyYAML guaranteed) if available, else system python
+    local PYTHON="$venv_python"
+    if [ ! -x "$PYTHON" ]; then
+        PYTHON="python3"
+    fi
+
+    echo "🔧 Checking production config for missing sections..."
+
+    PROD_CONFIG="$prod_config" EXAMPLE_CONFIG="$example_config" \
+    $PYTHON - << 'PYEOF'
+import sys
+import os
+
+try:
+    import yaml
+except ImportError:
+    print("   ⚠️  PyYAML not available — skipping config merge")
+    sys.exit(0)
+
+prod_path = os.environ.get("PROD_CONFIG", "")
+example_path = os.environ.get("EXAMPLE_CONFIG", "")
+
+if not prod_path or not example_path:
+    print("   ⚠️  Config paths not set — skipping config merge")
+    sys.exit(0)
+
+# Parse production config
+try:
+    with open(prod_path, 'r') as f:
+        prod_text = f.read()
+    prod_config = yaml.safe_load(prod_text)
+    if prod_config is None:
+        prod_config = {}
+except Exception as e:
+    print(f"   ⚠️  Failed to parse production config: {e}")
+    print("      Skipping config merge (config may have syntax issues)")
+    sys.exit(0)
+
+# Parse example config
+try:
+    with open(example_path, 'r') as f:
+        example_text = f.read()
+    example_config = yaml.safe_load(example_text)
+    if example_config is None:
+        example_config = {}
+except Exception as e:
+    print(f"   ⚠️  Failed to parse example config: {e}")
+    sys.exit(0)
+
+# Sections to check (in order they appear in example)
+sections_to_check = ['portal', 'updates', 'fleet', 'wifi_ap']
+missing_sections = [s for s in sections_to_check if s not in prod_config]
+
+if not missing_sections:
+    print("   ✅ All config sections present")
+else:
+    print(f"   Adding missing sections: {', '.join(missing_sections)}")
+
+    # Ensure file ends with newline before appending
+    if prod_text and not prod_text.endswith('\n'):
+        prod_text += '\n'
+
+    # Extract raw text blocks from example config for each missing section
+    example_lines = example_text.split('\n')
+
+    for section in missing_sections:
+        block_lines = []
+        in_section = False
+        found_header = False  # True once we've seen the "section:" line
+        section_pattern = f"{section}:"
+
+        for i, line in enumerate(example_lines):
+            if not in_section:
+                # Capture comment lines that precede the section header
+                if line.startswith('#') and i + 1 < len(example_lines):
+                    for j in range(i + 1, min(i + 5, len(example_lines))):
+                        if example_lines[j].strip() == '' or example_lines[j].startswith('#'):
+                            continue
+                        if example_lines[j].startswith(section_pattern):
+                            in_section = True
+                            block_lines.append(line)
+                            break
+                        break
+                elif line.startswith(section_pattern):
+                    in_section = True
+                    found_header = True
+                    block_lines.append(line)
+            elif in_section:
+                # The section key line itself (e.g. "portal:") comes right after comment
+                if not found_header and line.startswith(section_pattern):
+                    found_header = True
+                    block_lines.append(line)
+                    continue
+                # End of section: next top-level key (non-indented, non-comment, non-empty)
+                if line and not line[0].isspace() and not line.startswith('#'):
+                    break
+                block_lines.append(line)
+
+        if block_lines:
+            # Remove trailing empty lines and stray comments (belong to next section)
+            while block_lines and (block_lines[-1].strip() == '' or block_lines[-1].startswith('#')):
+                block_lines.pop()
+            prod_text += '\n' + '\n'.join(block_lines) + '\n'
+            print(f"   ✅ Appended '{section}' section from example config")
+        else:
+            print(f"   ⚠️  Could not extract '{section}' block from example config")
+
+    # Write updated config
+    try:
+        with open(prod_path, 'w') as f:
+            f.write(prod_text)
+    except Exception as e:
+        print(f"   ❌ Failed to write config: {e}")
+        sys.exit(0)
+
+# Check fleet.token — generate if missing or empty
+try:
+    with open(prod_path, 'r') as f:
+        final_text = f.read()
+    final_config = yaml.safe_load(final_text)
+    if final_config is None:
+        final_config = {}
+
+    fleet = final_config.get('fleet') or {}
+    token = fleet.get('token', '')
+    if not token:
+        import secrets, re
+        new_token = secrets.token_urlsafe(32)
+        # Replace empty token value — matches token: '' or token: "" or token:
+        final_text = re.sub(
+            r"^(\s*token:\s*)['\"]?['\"]?\s*(#.*)?$",
+            rf"\g<1>'{new_token}'  \g<2>",
+            final_text,
+            count=1,
+            flags=re.MULTILINE
+        )
+        with open(prod_path, 'w') as f:
+            f.write(final_text)
+        print(f"   🔑 Generated fleet token: {new_token[:8]}...")
+    else:
+        print(f"   🔑 Fleet token exists: {token[:8]}...")
+except Exception as e:
+    print(f"   ⚠️  Fleet token check failed: {e}")
+
+PYEOF
+}
+
 # Function to generate camera proxy configuration
 generate_camera_proxy_config() {
     local config_file="$PROJECT_ROOT/config/config.yaml"
@@ -1027,6 +1194,10 @@ else
     fi
 fi
 
+# Merge missing config sections (fleet, updates, portal, wifi_ap) into production config.
+# Runs after config is in place — covers --preserve-config, interactive keep, and fresh install.
+merge_missing_config_sections
+
 echo "🌐 Installing Nginx proxy configuration..."
 generate_camera_proxy_config
 
@@ -1155,7 +1326,7 @@ if [ -f /var/lib/sai-cam/update-state.json ]; then
     sudo chmod 664 /var/lib/sai-cam/update-state.json
 fi
 sudo chown $SYSTEM_USER:$SYSTEM_GROUP $CONFIG_DIR/config.yaml
-sudo chmod 644 $CONFIG_DIR/config.yaml
+sudo chmod 640 $CONFIG_DIR/config.yaml
 sudo chmod 644 /etc/nginx/sites-available/camera-proxy
 sudo chmod 644 /etc/systemd/system/sai-cam.service
 sudo chmod 644 /etc/logrotate.d/sai-cam
