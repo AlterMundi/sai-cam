@@ -232,6 +232,27 @@ read_config_value() {
             "device.id")
                 grep -A 3 "^device:" "$config_file" | grep -E "^\s*id:" | sed 's/.*id:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
+            "network.mode")
+                _v=$(grep -A 15 "^network:" "$config_file" | grep -m1 -E "^\s*mode:" | sed 's/.*mode:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.gateway")
+                _v=$(grep -A 15 "^network:" "$config_file" | grep -m1 -E "^\s*gateway:" | sed 's/.*gateway:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.wifi_client.ssid")
+                _v=$(grep -A 30 "^network:" "$config_file" | grep -A 10 "wifi_client:" | grep -m1 -E "^\s*ssid:" | sed 's/.*ssid:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.wifi_client.password")
+                _v=$(grep -A 30 "^network:" "$config_file" | grep -A 10 "wifi_client:" | grep -m1 -E "^\s*password:" | sed 's/.*password:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.wifi_client.wifi_iface")
+                _v=$(grep -A 30 "^network:" "$config_file" | grep -A 10 "wifi_client:" | grep -m1 -E "^\s*wifi_iface:" | sed 's/.*wifi_iface:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "wifi_ap.country_code")
+                _v=$(grep -A 10 "^wifi_ap:" "$config_file" | grep -m1 -E "^\s*country_code:" | sed 's/.*country_code:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "wifi_ap.enabled")
+                _v=$(grep -A 10 "^wifi_ap:" "$config_file" | grep -m1 -E "^\s*enabled:" | sed 's/.*enabled:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
             *)
                 echo "$default_value"
                 ;;
@@ -494,6 +515,7 @@ WIFI_CLIENT_SSID=$(read_config_value "network.wifi_client.ssid" "")
 WIFI_CLIENT_PASSWORD=$(read_config_value "network.wifi_client.password" "")
 WIFI_CLIENT_INTERFACE=$(read_config_value "network.wifi_client.wifi_iface" "wlan0")
 WIFI_COUNTRY_CODE=$(read_config_value "wifi_ap.country_code" "AR")
+WIFI_AP_ENABLED=$(read_config_value "wifi_ap.enabled" "auto")
 SYSTEM_USER=$(read_config_value "system.user" "$DEFAULT_USER")
 SYSTEM_GROUP=$(read_config_value "system.group" "$DEFAULT_GROUP")
 
@@ -1223,6 +1245,8 @@ if [ "$NETWORK_MODE" = "wifi-client" ]; then
     echo "⊘ WiFi AP skipped: network mode is 'wifi-client'"
     echo "   The WiFi interface is used for internet connectivity"
     echo "   WiFi AP requires a second WiFi interface (e.g., USB WiFi adapter)"
+elif [ "$WIFI_AP_ENABLED" = "false" ]; then
+    echo "⊘ WiFi AP skipped: wifi_ap.enabled is false in config"
 elif iw dev wlan0 info > /dev/null 2>&1; then
     echo "✅ WiFi hardware detected (wlan0)"
 
