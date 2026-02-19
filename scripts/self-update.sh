@@ -263,7 +263,10 @@ except ImportError:
         write_state "status=fetch_failed"
         exit 1
     }
-    git checkout "$TARGET_TAG" 2>&1 || {
+    # Force checkout — discard any local modifications to the repo clone.
+    # Nodes sometimes have manual hotfixes applied directly to /opt/sai-cam/repo;
+    # those are intentionally overwritten by the release.
+    git checkout -f "$TARGET_TAG" 2>&1 || {
         log_err "Failed to checkout tag $TARGET_TAG"
         write_state "status=checkout_failed"
         exit 1

@@ -977,7 +977,7 @@ if [ -n "$CONNECTION_NAME" ] && [ -n "$INTERFACE" ] && [ -n "$NODE_IP" ]; then
     fi
 
     echo "🔌 Activating ethernet connection..."
-    sudo nmcli con up "$CONNECTION_NAME"
+    sudo nmcli con up "$CONNECTION_NAME" || echo "⚠️  Network activation returned error (DHCP may have timed out on camera-only subnet), continuing..."
 
     echo "✅ Network configuration completed successfully"
 else
@@ -1626,7 +1626,7 @@ try:
     print(c.get('metrics', {}).get('remote_write_url', 'https://grafana2.altermundi.net/vmwrite'))
 except Exception:
     print('https://grafana2.altermundi.net/vmwrite')
-" 2>/dev/null)
+" 2>/dev/null) || true
 REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://grafana2.altermundi.net/vmwrite"}
 
 REMOTE_WRITE_USER=$(python3 -c "
@@ -1637,7 +1637,7 @@ try:
     print(c.get('metrics', {}).get('remote_write_user', 'vmwriter'))
 except Exception:
     print('vmwriter')
-" 2>/dev/null)
+" 2>/dev/null) || true
 REMOTE_WRITE_USER=${REMOTE_WRITE_USER:-"vmwriter"}
 
 REMOTE_WRITE_PASSWORD=$(python3 -c "
@@ -1648,7 +1648,7 @@ try:
     print(c.get('metrics', {}).get('remote_write_password', ''))
 except Exception:
     print('')
-" 2>/dev/null)
+" 2>/dev/null) || true
 
 # Auto-enable monitoring if password is set and flag wasn't passed explicitly
 if [ -n "$REMOTE_WRITE_PASSWORD" ] && [ "$INSTALL_MONITORING" = false ]; then
