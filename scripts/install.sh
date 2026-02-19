@@ -332,7 +332,7 @@ except Exception as e:
     sys.exit(0)
 
 # Sections to check (in order they appear in example)
-sections_to_check = ['portal', 'updates', 'fleet', 'wifi_ap']
+sections_to_check = ['portal', 'updates', 'fleet', 'wifi_ap', 'metrics']
 missing_sections = [s for s in sections_to_check if s not in prod_config]
 
 if not missing_sections:
@@ -1615,6 +1615,47 @@ else
     echo "ℹ️  Hardware watchdog not available (not a Raspberry Pi?)"
 fi
 
+# Read monitoring credentials early to allow auto-detection.
+# Reads from production config ($CONFIG_DIR/config.yaml) so this works during
+# self-update (where PROJECT_ROOT is the repo clone, not the admin's checkout).
+REMOTE_WRITE_URL=$(python3 -c "
+import yaml, sys
+try:
+    with open('$CONFIG_DIR/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_url', 'https://grafana2.altermundi.net/vmwrite'))
+except Exception:
+    print('https://grafana2.altermundi.net/vmwrite')
+" 2>/dev/null)
+REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://grafana2.altermundi.net/vmwrite"}
+
+REMOTE_WRITE_USER=$(python3 -c "
+import yaml, sys
+try:
+    with open('$CONFIG_DIR/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_user', 'vmwriter'))
+except Exception:
+    print('vmwriter')
+" 2>/dev/null)
+REMOTE_WRITE_USER=${REMOTE_WRITE_USER:-"vmwriter"}
+
+REMOTE_WRITE_PASSWORD=$(python3 -c "
+import yaml, sys
+try:
+    with open('$CONFIG_DIR/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_password', ''))
+except Exception:
+    print('')
+" 2>/dev/null)
+
+# Auto-enable monitoring if password is set and flag wasn't passed explicitly
+if [ -n "$REMOTE_WRITE_PASSWORD" ] && [ "$INSTALL_MONITORING" = false ]; then
+    echo "📊 metrics.remote_write_password is set — enabling monitoring automatically"
+    INSTALL_MONITORING=true
+fi
+
 # ══════════════════════════════════════════════════════════════════════════════
 # vmagent metrics shipper (optional, --monitoring flag)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1674,38 +1715,6 @@ if [ "$INSTALL_MONITORING" = true ]; then
     if [ "$INSTALL_MONITORING" = true ]; then
         # Read config values for vmagent
         NODE_ID=$(read_config_value "device.id" "unknown")
-
-        # Read metrics config from config.yaml
-        REMOTE_WRITE_URL=$(python3 -c "
-import yaml, sys
-try:
-    with open('$PROJECT_ROOT/config/config.yaml') as f:
-        c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_url', 'https://grafana2.altermundi.net/vmwrite'))
-except Exception:
-    print('https://grafana2.altermundi.net/vmwrite')
-" 2>/dev/null)
-        REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://grafana2.altermundi.net/vmwrite"}
-
-        REMOTE_WRITE_USER=$(python3 -c "
-import yaml, sys
-try:
-    with open('$PROJECT_ROOT/config/config.yaml') as f:
-        c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_user', ''))
-except Exception:
-    print('')
-" 2>/dev/null)
-
-        REMOTE_WRITE_PASSWORD=$(python3 -c "
-import yaml, sys
-try:
-    with open('$PROJECT_ROOT/config/config.yaml') as f:
-        c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_password', ''))
-except Exception:
-    print('')
-" 2>/dev/null)
 
         echo "🔧 Configuring vmagent..."
         echo "   Node ID:          $NODE_ID"
