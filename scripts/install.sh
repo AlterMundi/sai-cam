@@ -1569,6 +1569,18 @@ EOF
 sudo chmod 644 "$CRON_FILE"
 echo "✅ Scheduled tasks configured (including daily reboot at 4 AM)"
 
+# Configure periodic fsck on the root filesystem.
+# With daily reboots, mount-count 30 ≈ monthly — ext4 triggers fsck automatically
+# at the next boot when the count is reached.  No extra cron or reboot needed.
+ROOT_DEV=$(findmnt -n -o SOURCE /)
+if [ -n "$ROOT_DEV" ] && sudo tune2fs -l "$ROOT_DEV" &>/dev/null; then
+    echo "🔍 Configuring monthly fsck on $ROOT_DEV (every 30 mounts)..."
+    sudo tune2fs -c 30 -i 0 "$ROOT_DEV"
+    echo "✅ fsck scheduled: auto-runs at next reboot after 30 mounts (~monthly)"
+else
+    echo "⚠️  Could not configure fsck: root device not detected"
+fi
+
 # Hardware watchdog (Raspberry Pi specific)
 if [ -e /dev/watchdog ] || modprobe bcm2835_wdt 2>/dev/null; then
     echo "🐕 Configuring hardware watchdog..."

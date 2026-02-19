@@ -267,8 +267,17 @@ def get_camera_status():
             if uploaded_path.exists():
                 cam_images.extend(uploaded_path.glob(f'{cam_id}_*.jpg'))
             if cam_images:
-                latest = max(cam_images, key=lambda p: p.stat().st_mtime)
-                latest_image = latest.name
+                def _safe_mtime(p):
+                    try:
+                        return p.stat().st_mtime
+                    except OSError:
+                        return 0
+                latest = max(cam_images, key=_safe_mtime)
+                try:
+                    latest.stat()  # confirm it's readable before using it
+                    latest_image = latest.name
+                except OSError:
+                    pass
 
         cameras.append({
             'id': cam_id,
@@ -296,9 +305,14 @@ def get_storage_info():
         uploaded_path = storage_path / 'uploaded'
         uploaded_images = list(uploaded_path.glob('*.jpg')) if uploaded_path.exists() else []
 
-        # Calculate sizes
-        pending_size = sum(f.stat().st_size for f in pending_images) / 1024 / 1024  # MB
-        uploaded_size = sum(f.stat().st_size for f in uploaded_images) / 1024 / 1024
+        # Calculate sizes — skip files with unreadable inodes (e.g. fs corruption)
+        def _safe_size(f):
+            try:
+                return f.stat().st_size
+            except OSError:
+                return 0
+        pending_size = sum(_safe_size(f) for f in pending_images) / 1024 / 1024  # MB
+        uploaded_size = sum(_safe_size(f) for f in uploaded_images) / 1024 / 1024
 
         return {
             'total_images': len(pending_images) + len(uploaded_images),
