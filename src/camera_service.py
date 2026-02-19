@@ -942,7 +942,12 @@ class StorageManager:
     def get_current_size_gb(self):
         """Calculate current storage usage"""
         try:
-            total_size = sum(f.stat().st_size for f in self.base_path.rglob('*') if f.is_file())
+            def _safe_size(f):
+                try:
+                    return f.stat().st_size
+                except OSError:
+                    return 0
+            total_size = sum(_safe_size(f) for f in self.base_path.rglob('*') if f.is_file())
             return total_size / (1024**3)  # Convert to GB
         except Exception as e:
             self.logger.error(f"Error calculating storage size: {e}")
@@ -1012,7 +1017,12 @@ class StorageManager:
             return  # Another cleanup is in progress
 
         try:
-            current_size_bytes = sum(f.stat().st_size for f in self.base_path.rglob('*') if f.is_file())
+            def _safe_size(f):
+                try:
+                    return f.stat().st_size
+                except OSError:
+                    return 0
+            current_size_bytes = sum(_safe_size(f) for f in self.base_path.rglob('*') if f.is_file())
             current_size_gb = current_size_bytes / (1024**3)
             target_size_bytes = self.cleanup_threshold_gb * (1024**3)
             retention_seconds = self.retention_days * 24 * 3600
@@ -1030,8 +1040,8 @@ class StorageManager:
                         try:
                             stat = f.stat()
                             uploaded_files.append((f, stat.st_mtime, stat.st_size))
-                        except FileNotFoundError:
-                            continue  # File was deleted by another thread
+                        except OSError:
+                            continue  # File deleted or inode corrupted — skip
                     uploaded_files.sort(key=lambda x: x[1])  # Sort by mtime (oldest first)
 
                     for file, mtime, file_size in uploaded_files:
@@ -1064,7 +1074,7 @@ class StorageManager:
                         try:
                             stat = f.stat()
                             non_uploaded_files.append((f, stat.st_mtime, stat.st_size))
-                        except FileNotFoundError:
+                        except OSError:
                             continue
                     non_uploaded_files.sort(key=lambda x: x[1])
 
