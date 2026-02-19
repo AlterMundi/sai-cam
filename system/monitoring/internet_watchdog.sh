@@ -59,6 +59,15 @@ main() {
         exit 0
     fi
 
+    # Also skip if wlan0 is currently carrying the default route or has an IP
+    # (catches ethernet-mode nodes like saicam6 that use WiFi for internet)
+    if ip route show default 2>/dev/null | grep -q "dev wlan0"; then
+        exit 0
+    fi
+    if nmcli -t -f DEVICE,TYPE,STATE dev 2>/dev/null | grep -q "^wlan0:wifi:connected"; then
+        exit 0
+    fi
+
     # Check if AP connection exists
     if ! ap_exists; then
         exit 0

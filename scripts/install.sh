@@ -1242,19 +1242,28 @@ echo ""
 echo "📡 Checking WiFi Access Point Support"
 echo "-------------------------------------"
 
-# Skip WiFi AP if in wifi-client mode (same interface can't be client and AP)
-# Also skip if wlan0 is currently connected as a WiFi client — this covers
-# nodes in 'ethernet' mode where WiFi is the internet uplink (e.g. saicam6).
-WLAN0_IS_CLIENT=$(nmcli -t -f DEVICE,TYPE,STATE dev 2>/dev/null | grep "^wlan0:wifi:connected" || true)
+# Returns true (exit 0) if wlan0 is actively used as internet uplink.
+# Uses three independent signals so a transient NM state doesn't fool us.
+wlan0_is_internet_uplink() {
+    # Signal 1: default route via wlan0
+    ip route show default 2>/dev/null | grep -q "dev wlan0" && return 0
+    # Signal 2: NetworkManager reports wlan0 as connected WiFi client
+    nmcli -t -f DEVICE,TYPE,STATE dev 2>/dev/null | grep -q "^wlan0:wifi:connected" && return 0
+    # Signal 3: wlan0 has a global (non-link-local) IPv4 address
+    ip addr show wlan0 2>/dev/null | grep -q "inet [^1]" && return 0
+    return 1
+}
+
 if [ "$NETWORK_MODE" = "wifi-client" ]; then
-    echo "⊘ WiFi AP skipped: network mode is 'wifi-client'"
-    echo "   The WiFi interface is used for internet connectivity"
-    echo "   WiFi AP requires a second WiFi interface (e.g., USB WiFi adapter)"
-elif [ -n "$WLAN0_IS_CLIENT" ]; then
-    echo "⊘ WiFi AP skipped: wlan0 is active as a WiFi client (internet uplink)"
-    echo "   Set wifi_ap.enabled: false in config.yaml to suppress this check"
+    echo "⊘ WiFi AP skipped: network mode is 'wifi-client' (wlan0 is internet uplink)"
+    sudo nmcli con modify "sai-cam-ap" connection.autoconnect no 2>/dev/null || true
+elif wlan0_is_internet_uplink; then
+    echo "⊘ WiFi AP skipped: wlan0 is active internet uplink (route/IP/NM all checked)"
+    echo "   Set wifi_ap.enabled: false in config.yaml to make this explicit"
+    sudo nmcli con modify "sai-cam-ap" connection.autoconnect no 2>/dev/null || true
 elif [ "$WIFI_AP_ENABLED" = "false" ]; then
     echo "⊘ WiFi AP skipped: wifi_ap.enabled is false in config"
+    sudo nmcli con modify "sai-cam-ap" connection.autoconnect no 2>/dev/null || true
 elif iw dev wlan0 info > /dev/null 2>&1; then
     echo "✅ WiFi hardware detected (wlan0)"
 
@@ -1298,10 +1307,6 @@ elif iw dev wlan0 info > /dev/null 2>&1; then
     sudo systemctl disable hostapd dnsmasq 2>/dev/null || true
     sudo systemctl mask dnsmasq 2>/dev/null || true
 
-    # Stop wpa_supplicant (conflicts with NetworkManager AP mode)
-    echo "🔧 Configuring WiFi for AP mode..."
-    sudo systemctl stop wpa_supplicant 2>/dev/null || true
-
     # Unblock WiFi (required on fresh Raspberry Pi OS installations)
     echo "📡 Unblocking WiFi radio..."
     sudo rfkill unblock wifi 2>/dev/null || true
@@ -1315,24 +1320,39 @@ elif iw dev wlan0 info > /dev/null 2>&1; then
     sudo chmod 644 /etc/NetworkManager/dnsmasq-shared.d/captive-portal-dnsmasq.conf
     echo "✅ Captive portal DNS configured (AP: $AP_IP)"
 
-    # Restart NetworkManager to reinitialize WiFi interface and load dnsmasq config
-    echo "🔄 Restarting NetworkManager..."
-    sudo systemctl restart NetworkManager
-    sleep 3
-
-    # Bring up the WiFi AP
+    # Try to bring up AP without destructive ops first
     echo "🚀 Activating WiFi AP..."
     if sudo nmcli con up sai-cam-ap > /dev/null 2>&1; then
-        echo "✅ WiFi AP configured and activated successfully"
+        echo "✅ WiFi AP activated"
         echo "   SSID: SAI-Node-$DEVICE_ID"
         echo "   Password: $WIFI_PASSWORD"
         echo "   IP: $AP_IP"
         echo "   DHCP: $DHCP_RANGE_START-${DHCP_RANGE_END##*.} (managed by NetworkManager)"
         echo "   Captive Portal: Enabled (auto-redirect to status portal)"
     else
-        echo "⚠️  WiFi AP connection created but failed to activate"
-        echo "   This can happen if WiFi is in use or rfkill blocked"
-        echo "   Try manually: sudo rfkill unblock wifi && sudo systemctl stop wpa_supplicant && sudo nmcli con up sai-cam-ap"
+        # Fallback: stop wpa_supplicant and restart NM — but only if wlan0
+        # is still confirmed NOT an internet uplink (re-check here).
+        if wlan0_is_internet_uplink; then
+            echo "⚠️  Skipping fallback: wlan0 became internet uplink during setup"
+            echo "   Set wifi_ap.enabled: false to suppress AP setup on this node"
+            sudo nmcli con modify "sai-cam-ap" connection.autoconnect no 2>/dev/null || true
+        else
+            echo "🔧 First attempt failed — applying fallback (stop wpa_supplicant, restart NM)..."
+            sudo systemctl stop wpa_supplicant 2>/dev/null || true
+            sudo systemctl restart NetworkManager
+            sleep 3
+            if sudo nmcli con up sai-cam-ap > /dev/null 2>&1; then
+                echo "✅ WiFi AP configured and activated (fallback)"
+                echo "   SSID: SAI-Node-$DEVICE_ID"
+                echo "   Password: $WIFI_PASSWORD"
+                echo "   IP: $AP_IP"
+                echo "   DHCP: $DHCP_RANGE_START-${DHCP_RANGE_END##*.} (managed by NetworkManager)"
+                echo "   Captive Portal: Enabled (auto-redirect to status portal)"
+            else
+                echo "⚠️  WiFi AP connection created but failed to activate"
+                echo "   Try manually: sudo rfkill unblock wifi && sudo nmcli con up sai-cam-ap"
+            fi
+        fi
     fi
 else
     echo "⊘ No WiFi hardware detected, skipping AP setup"
