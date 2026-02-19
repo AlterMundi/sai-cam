@@ -1243,10 +1243,16 @@ echo "📡 Checking WiFi Access Point Support"
 echo "-------------------------------------"
 
 # Skip WiFi AP if in wifi-client mode (same interface can't be client and AP)
+# Also skip if wlan0 is currently connected as a WiFi client — this covers
+# nodes in 'ethernet' mode where WiFi is the internet uplink (e.g. saicam6).
+WLAN0_IS_CLIENT=$(nmcli -t -f DEVICE,TYPE,STATE dev 2>/dev/null | grep "^wlan0:wifi:connected" || true)
 if [ "$NETWORK_MODE" = "wifi-client" ]; then
     echo "⊘ WiFi AP skipped: network mode is 'wifi-client'"
     echo "   The WiFi interface is used for internet connectivity"
     echo "   WiFi AP requires a second WiFi interface (e.g., USB WiFi adapter)"
+elif [ -n "$WLAN0_IS_CLIENT" ]; then
+    echo "⊘ WiFi AP skipped: wlan0 is active as a WiFi client (internet uplink)"
+    echo "   Set wifi_ap.enabled: false in config.yaml to suppress this check"
 elif [ "$WIFI_AP_ENABLED" = "false" ]; then
     echo "⊘ WiFi AP skipped: wifi_ap.enabled is false in config"
 elif iw dev wlan0 info > /dev/null 2>&1; then
