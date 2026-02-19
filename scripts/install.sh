@@ -1036,10 +1036,12 @@ echo ""
 echo "📦 Installing System Dependencies"
 echo "---------------------------------"
 echo "🔄 Updating package repositories..."
-sudo apt-get update > /dev/null 2>&1
+sudo DEBIAN_FRONTEND=noninteractive apt-get update > /dev/null 2>&1
 
 echo "📥 Installing required packages: $SYSTEM_PACKAGES"
-sudo apt-get install -y $SYSTEM_PACKAGES
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Dpkg::Options::="--force-confold" \
+    $SYSTEM_PACKAGES
 echo "✅ System dependencies installed successfully"
 
 # Set up virtual environment
