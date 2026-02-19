@@ -200,3 +200,6 @@ fleet/nodes.yaml
 
 # Monitoring secrets
 monitoring/.env
+
+# AI collaboration logs
+_ai_logs/

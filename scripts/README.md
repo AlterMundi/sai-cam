@@ -442,3 +442,34 @@ For issues or questions:
 - Check the main [project README](../README.md)
 - Review service logs: `/var/log/sai-cam/camera_service.log`
 - Open an issue in the project repository
+
+---
+
+### 5. claude-second-opinion.sh
+
+**Structured Claude second-opinion helper for coding tasks**
+
+Builds a standardized prompt with git context (repo, branch, commit, diff preview), asks Claude in non-interactive mode, and stores the full exchange in `_ai_logs/`.
+
+#### Usage
+
+```bash
+# Basic usage
+./scripts/claude-second-opinion.sh --task "Review this implementation for regressions"
+
+# With constraints and custom model
+./scripts/claude-second-opinion.sh \
+  --task "Propose safer error handling for update flow" \
+  --constraints "Keep behavior backward-compatible" \
+  --model opus
+
+# With explicit timeout (seconds)
+./scripts/claude-second-opinion.sh \
+  --task "Review install script risk points" \
+  --timeout-seconds 240
+```
+
+#### Output
+
+- Log file: `_ai_logs/YYYYMMDD-HHMMSS-claude-second-opinion.md`
+- Includes prompt, git context, and Claude response for auditability.
