@@ -144,3 +144,10 @@ wifi_ap:
   password: 'saicam123'    # WiFi password (minimum 8 characters)
   channel: 6               # WiFi channel (1-11)
   country_code: 'AR'       # Country code for regulatory compliance
+
+# Metrics reporting (optional — enables Grafana/VictoriaMetrics monitoring)
+# Set remote_write_password to activate; leave empty to disable.
+metrics:
+  remote_write_url: 'https://grafana2.altermundi.net/vmwrite'
+  remote_write_user: 'vmwriter'
+  remote_write_password: ''

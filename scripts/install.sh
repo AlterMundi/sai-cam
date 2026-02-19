@@ -232,6 +232,27 @@ read_config_value() {
             "device.id")
                 grep -A 3 "^device:" "$config_file" | grep -E "^\s*id:" | sed 's/.*id:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'
                 ;;
+            "network.mode")
+                _v=$(grep -A 15 "^network:" "$config_file" | grep -m1 -E "^\s*mode:" | sed 's/.*mode:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.gateway")
+                _v=$(grep -A 15 "^network:" "$config_file" | grep -m1 -E "^\s*gateway:" | sed 's/.*gateway:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.wifi_client.ssid")
+                _v=$(grep -A 30 "^network:" "$config_file" | grep -A 10 "wifi_client:" | grep -m1 -E "^\s*ssid:" | sed 's/.*ssid:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.wifi_client.password")
+                _v=$(grep -A 30 "^network:" "$config_file" | grep -A 10 "wifi_client:" | grep -m1 -E "^\s*password:" | sed 's/.*password:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "network.wifi_client.wifi_iface")
+                _v=$(grep -A 30 "^network:" "$config_file" | grep -A 10 "wifi_client:" | grep -m1 -E "^\s*wifi_iface:" | sed 's/.*wifi_iface:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "wifi_ap.country_code")
+                _v=$(grep -A 10 "^wifi_ap:" "$config_file" | grep -m1 -E "^\s*country_code:" | sed 's/.*country_code:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
+            "wifi_ap.enabled")
+                _v=$(grep -A 10 "^wifi_ap:" "$config_file" | grep -m1 -E "^\s*enabled:" | sed 's/.*enabled:\s*['\''\"]*\([^'\''\"#]*\)['\''\"#]*.*/\1/' | sed 's/[[:space:]]*$//'); echo "${_v:-$default_value}"
+                ;;
             *)
                 echo "$default_value"
                 ;;
@@ -311,7 +332,7 @@ except Exception as e:
     sys.exit(0)
 
 # Sections to check (in order they appear in example)
-sections_to_check = ['portal', 'updates', 'fleet', 'wifi_ap']
+sections_to_check = ['portal', 'updates', 'fleet', 'wifi_ap', 'metrics']
 missing_sections = [s for s in sections_to_check if s not in prod_config]
 
 if not missing_sections:
@@ -494,6 +515,7 @@ WIFI_CLIENT_SSID=$(read_config_value "network.wifi_client.ssid" "")
 WIFI_CLIENT_PASSWORD=$(read_config_value "network.wifi_client.password" "")
 WIFI_CLIENT_INTERFACE=$(read_config_value "network.wifi_client.wifi_iface" "wlan0")
 WIFI_COUNTRY_CODE=$(read_config_value "wifi_ap.country_code" "AR")
+WIFI_AP_ENABLED=$(read_config_value "wifi_ap.enabled" "auto")
 SYSTEM_USER=$(read_config_value "system.user" "$DEFAULT_USER")
 SYSTEM_GROUP=$(read_config_value "system.group" "$DEFAULT_GROUP")
 
@@ -1223,6 +1245,8 @@ if [ "$NETWORK_MODE" = "wifi-client" ]; then
     echo "⊘ WiFi AP skipped: network mode is 'wifi-client'"
     echo "   The WiFi interface is used for internet connectivity"
     echo "   WiFi AP requires a second WiFi interface (e.g., USB WiFi adapter)"
+elif [ "$WIFI_AP_ENABLED" = "false" ]; then
+    echo "⊘ WiFi AP skipped: wifi_ap.enabled is false in config"
 elif iw dev wlan0 info > /dev/null 2>&1; then
     echo "✅ WiFi hardware detected (wlan0)"
 
@@ -1545,6 +1569,18 @@ EOF
 sudo chmod 644 "$CRON_FILE"
 echo "✅ Scheduled tasks configured (including daily reboot at 4 AM)"
 
+# Configure periodic fsck on the root filesystem.
+# With daily reboots, mount-count 30 ≈ monthly — ext4 triggers fsck automatically
+# at the next boot when the count is reached.  No extra cron or reboot needed.
+ROOT_DEV=$(findmnt -n -o SOURCE /)
+if [ -n "$ROOT_DEV" ] && sudo tune2fs -l "$ROOT_DEV" &>/dev/null; then
+    echo "🔍 Configuring monthly fsck on $ROOT_DEV (every 30 mounts)..."
+    sudo tune2fs -c 30 -i 0 "$ROOT_DEV"
+    echo "✅ fsck scheduled: auto-runs at next reboot after 30 mounts (~monthly)"
+else
+    echo "⚠️  Could not configure fsck: root device not detected"
+fi
+
 # Hardware watchdog (Raspberry Pi specific)
 if [ -e /dev/watchdog ] || modprobe bcm2835_wdt 2>/dev/null; then
     echo "🐕 Configuring hardware watchdog..."
@@ -1577,6 +1613,47 @@ if [ -e /dev/watchdog ] || modprobe bcm2835_wdt 2>/dev/null; then
     fi
 else
     echo "ℹ️  Hardware watchdog not available (not a Raspberry Pi?)"
+fi
+
+# Read monitoring credentials early to allow auto-detection.
+# Reads from production config ($CONFIG_DIR/config.yaml) so this works during
+# self-update (where PROJECT_ROOT is the repo clone, not the admin's checkout).
+REMOTE_WRITE_URL=$(python3 -c "
+import yaml, sys
+try:
+    with open('$CONFIG_DIR/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_url', 'https://grafana2.altermundi.net/vmwrite'))
+except Exception:
+    print('https://grafana2.altermundi.net/vmwrite')
+" 2>/dev/null)
+REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://grafana2.altermundi.net/vmwrite"}
+
+REMOTE_WRITE_USER=$(python3 -c "
+import yaml, sys
+try:
+    with open('$CONFIG_DIR/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_user', 'vmwriter'))
+except Exception:
+    print('vmwriter')
+" 2>/dev/null)
+REMOTE_WRITE_USER=${REMOTE_WRITE_USER:-"vmwriter"}
+
+REMOTE_WRITE_PASSWORD=$(python3 -c "
+import yaml, sys
+try:
+    with open('$CONFIG_DIR/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('metrics', {}).get('remote_write_password', ''))
+except Exception:
+    print('')
+" 2>/dev/null)
+
+# Auto-enable monitoring if password is set and flag wasn't passed explicitly
+if [ -n "$REMOTE_WRITE_PASSWORD" ] && [ "$INSTALL_MONITORING" = false ]; then
+    echo "📊 metrics.remote_write_password is set — enabling monitoring automatically"
+    INSTALL_MONITORING=true
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1638,38 +1715,6 @@ if [ "$INSTALL_MONITORING" = true ]; then
     if [ "$INSTALL_MONITORING" = true ]; then
         # Read config values for vmagent
         NODE_ID=$(read_config_value "device.id" "unknown")
-
-        # Read metrics config from config.yaml
-        REMOTE_WRITE_URL=$(python3 -c "
-import yaml, sys
-try:
-    with open('$PROJECT_ROOT/config/config.yaml') as f:
-        c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_url', 'https://grafana2.altermundi.net/vmwrite'))
-except Exception:
-    print('https://grafana2.altermundi.net/vmwrite')
-" 2>/dev/null)
-        REMOTE_WRITE_URL=${REMOTE_WRITE_URL:-"https://grafana2.altermundi.net/vmwrite"}
-
-        REMOTE_WRITE_USER=$(python3 -c "
-import yaml, sys
-try:
-    with open('$PROJECT_ROOT/config/config.yaml') as f:
-        c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_user', ''))
-except Exception:
-    print('')
-" 2>/dev/null)
-
-        REMOTE_WRITE_PASSWORD=$(python3 -c "
-import yaml, sys
-try:
-    with open('$PROJECT_ROOT/config/config.yaml') as f:
-        c = yaml.safe_load(f)
-    print(c.get('metrics', {}).get('remote_write_password', ''))
-except Exception:
-    print('')
-" 2>/dev/null)
 
         echo "🔧 Configuring vmagent..."
         echo "   Node ID:          $NODE_ID"
