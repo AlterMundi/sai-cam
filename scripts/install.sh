@@ -210,7 +210,13 @@ read_config_value() {
     local key="$1"
     local config_file="$PROJECT_ROOT/config/config.yaml"
     local default_value="$2"
-    
+
+    # In preserve-config mode, prefer the production config so runtime values
+    # (remote_write_password, device.id, etc.) are read from the live node config.
+    if [ "${PRESERVE_CONFIG:-false}" = true ] && [ -f "/etc/sai-cam/config.yaml" ]; then
+        config_file="/etc/sai-cam/config.yaml"
+    fi
+
     if [ -f "$config_file" ]; then
         # Simple YAML parser for specific keys - handles quotes and comments
         case $key in
