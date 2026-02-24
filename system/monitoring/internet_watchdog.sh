@@ -10,6 +10,9 @@ PING_TIMEOUT=3
 STATE_FILE="/tmp/sai-cam-internet-state"
 CONFIG_FILE="/etc/sai-cam/config.yaml"
 AP_CONNECTION="sai-cam-ap"
+FAIL_COUNT_FILE="/tmp/sai-cam-net-fails"
+MAX_FAILS_RESTART=3   # ~9 min  → bounce eth interface
+MAX_FAILS_REBOOT=6    # ~18 min → reboot
 
 # Get network mode from config
 get_network_mode() {
@@ -96,6 +99,36 @@ main() {
 
     # Save current state
     echo "$CURR_STATE" > "$STATE_FILE"
+
+    # --- Escalating recovery ---
+    if [ "$CURR_STATE" = "up" ]; then
+        echo 0 > "$FAIL_COUNT_FILE"
+    else
+        FAILS=$(cat "$FAIL_COUNT_FILE" 2>/dev/null || echo 0)
+        FAILS=$((FAILS + 1))
+        echo "$FAILS" > "$FAIL_COUNT_FILE"
+        logger -t "sai-cam-internet-watchdog" \
+            "Consecutive failures: $FAILS / $MAX_FAILS_REBOOT"
+
+        if [ "$FAILS" -ge "$MAX_FAILS_REBOOT" ]; then
+            logger -t "sai-cam-internet-watchdog" \
+                "CRITICAL: $FAILS failures — rebooting"
+            echo 0 > "$FAIL_COUNT_FILE"
+            sync
+            /sbin/reboot -f
+
+        elif [ "$FAILS" -ge "$MAX_FAILS_RESTART" ]; then
+            ETH_IFACE=$(ip -o link show | \
+                awk -F': ' '!/lo|wlan|docker|br-|veth|zt/{print $2; exit}')
+            if [ -n "$ETH_IFACE" ]; then
+                logger -t "sai-cam-internet-watchdog" \
+                    "$FAILS failures — bouncing $ETH_IFACE"
+                ip link set "$ETH_IFACE" down
+                sleep 3
+                ip link set "$ETH_IFACE" up
+            fi
+        fi
+    fi
 }
 
 main "$@"

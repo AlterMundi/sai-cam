@@ -1649,6 +1649,59 @@ else
     echo "ℹ️  Hardware watchdog not available (not a Raspberry Pi?)"
 fi
 
+# --- Kernel resilience ---
+echo "🔧 Configuring kernel resilience (panic reboot, OOM, TCP keepalive)..."
+sudo cp "$INSTALL_DIR/system/config/sysctl-resilience.conf" \
+    /etc/sysctl.d/99-sai-cam-resilience.conf
+sudo sysctl --system > /dev/null 2>&1
+echo "✅ Kernel: panic→reboot 5s, OOM→reboot, TCP keepalive 60/10/6s"
+
+# --- SSH connection resilience ---
+echo "🔒 Hardening SSH keepalive for unreliable links..."
+SSHD_CONF="/etc/ssh/sshd_config"
+for kv in "ClientAliveInterval 30" "ClientAliveCountMax 6" \
+           "TCPKeepAlive yes" "UseDNS no"; do
+    key="${kv%% *}"; val="${kv#* }"
+    if grep -q "^${key}" "$SSHD_CONF"; then
+        sudo sed -i "s/^${key}.*/${key} ${val}/" "$SSHD_CONF"
+    elif grep -q "^#${key}" "$SSHD_CONF"; then
+        sudo sed -i "s/^#${key}.*/${key} ${val}/" "$SSHD_CONF"
+    else
+        echo "${key} ${val}" | sudo tee -a "$SSHD_CONF" > /dev/null
+    fi
+done
+sudo systemctl restart sshd 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
+echo "✅ SSH keepalive: 30s interval, 6 retries (3 min tolerance on drops)"
+
+# --- Filesystem resilience (SD card protection) ---
+echo "💾 Configuring filesystem resilience..."
+
+# noatime: stop updating access timestamps on every read
+if ! grep -qE "noatime|relatime" /etc/fstab; then
+    sudo sed -i 's|\(.*ext4.*\)defaults|\1defaults,noatime|' /etc/fstab 2>/dev/null || true
+    echo "   noatime added to root filesystem"
+fi
+
+# tmpfs for /tmp — camera service temp files on RAM, not SD card
+if ! grep -q "tmpfs.*/tmp" /etc/fstab; then
+    echo "tmpfs /tmp tmpfs defaults,noatime,nosuid,nodev,size=128M 0 0" \
+        | sudo tee -a /etc/fstab > /dev/null
+    echo "   /tmp → tmpfs (128 MB, RAM)"
+fi
+
+# Journal size cap — prevent logs from silently filling SD card
+sudo mkdir -p /etc/systemd/journald.conf.d
+sudo tee /etc/systemd/journald.conf.d/sai-cam-limits.conf > /dev/null << 'JRNL'
+[Journal]
+SystemMaxUse=50M
+SystemMaxFileSize=10M
+MaxRetentionSec=14day
+Compress=yes
+Storage=persistent
+JRNL
+sudo systemctl restart systemd-journald 2>/dev/null || true
+echo "✅ Filesystem: noatime, /tmp on tmpfs (128M), journal ≤ 50M"
+
 # Read monitoring credentials early to allow auto-detection.
 # Reads from production config ($CONFIG_DIR/config.yaml) so this works during
 # self-update (where PROJECT_ROOT is the repo clone, not the admin's checkout).
