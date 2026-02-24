@@ -750,8 +750,14 @@ def main():
                         help='Show pending counts without uploading')
     parser.add_argument('--no-wait', action='store_true', dest='no_wait',
                         help="Don't poll after --update/--retry-uploads, just trigger and exit")
+    parser.add_argument('nodes', nargs='*', default=[],
+                        help='Node names (alternative to inline node args)')
 
     args = parser.parse_args()
+
+    # Trailing positional nodes act as fallback when nargs='*' flags
+    # get empty lists due to intervening flags (e.g. --retry-uploads --dry-run saicam3)
+    _extra = args.nodes
 
     # Find registry file
     if args.registry:
@@ -769,19 +775,19 @@ def main():
     elif args.ping:
         cli.cmd_ping()
     elif args.status is not None:
-        cli.cmd_status(args.status or ['ALL'])
+        cli.cmd_status(args.status or _extra or ['ALL'])
     elif args.update is not None:
-        cli.cmd_update(args.update or ['ALL'], wait=not args.no_wait)
+        cli.cmd_update(args.update or _extra or ['ALL'], wait=not args.no_wait)
     elif args.restart is not None:
-        cli.cmd_restart(args.restart or ['ALL'])
+        cli.cmd_restart(args.restart or _extra or ['ALL'])
     elif args.reboot is not None:
-        cli.cmd_reboot(args.reboot or ['ALL'])
+        cli.cmd_reboot(args.reboot or _extra or ['ALL'])
     elif args.set:
         key_value = args.set[0]
-        node_names = args.set[1:] or ['ALL']
+        node_names = args.set[1:] or _extra or ['ALL']
         cli.cmd_set(key_value, node_names)
     elif args.retry_uploads is not None:
-        cli.cmd_retry_uploads(args.retry_uploads or ['ALL'],
+        cli.cmd_retry_uploads(args.retry_uploads or _extra or ['ALL'],
                               dry_run=args.dry_run,
                               max_images=args.max_images,
                               rate_limit=args.rate_limit,
