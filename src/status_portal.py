@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -1387,6 +1388,189 @@ def api_fleet_config():
         return jsonify({'error': 'Permission denied writing config'}), 403
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+_retry_upload_state = {
+    'running': False,
+    'total': 0,
+    'uploaded': 0,
+    'failed': 0,
+    'skipped': 0,
+    'current_file': None,
+    'started_at': None,
+    'finished_at': None,
+    'errors': [],
+}
+_retry_upload_lock = __import__('threading').Lock()
+
+
+def _do_retry_uploads(images, server_url, auth_token, ssl_verify,
+                      timeout, rate_limit, storage_base, uploaded_dir):
+    """Background worker: upload pending images one by one."""
+    global _retry_upload_state
+    metadata_dir = Path(storage_base) / 'metadata'
+    uploaded_meta_dir = Path(uploaded_dir) / 'metadata'
+    uploaded_meta_dir.mkdir(parents=True, exist_ok=True)
+
+    for filepath in images:
+        if not _retry_upload_state['running']:
+            break  # cancelled
+
+        filename = filepath.name
+        _retry_upload_state['current_file'] = filename
+
+        try:
+            image_data = filepath.read_bytes()
+            if len(image_data) == 0:
+                _retry_upload_state['skipped'] += 1
+                continue
+
+            # Load metadata JSON (required — caller already filtered)
+            meta_path = metadata_dir / f"{filename}.json"
+            with open(meta_path, 'r') as f:
+                metadata = json.load(f)
+
+            files = {
+                'image': (filename, image_data, 'image/jpeg'),
+                'metadata': ('metadata.json', json.dumps(metadata),
+                             'application/json'),
+            }
+            headers = {'Authorization': f'Bearer {auth_token}'}
+
+            resp = __import__('requests').post(
+                server_url, headers=headers, files=files,
+                verify=ssl_verify, timeout=timeout,
+            )
+
+            if resp.status_code == 200:
+                # Move image and metadata to uploaded/
+                dst = Path(uploaded_dir) / filename
+                shutil.move(str(filepath), str(dst))
+                if meta_path.exists():
+                    shutil.move(str(meta_path),
+                                str(uploaded_meta_dir / f"{filename}.json"))
+                _retry_upload_state['uploaded'] += 1
+            else:
+                _retry_upload_state['failed'] += 1
+                err = f"{filename}: HTTP {resp.status_code}"
+                _retry_upload_state['errors'].append(err)
+        except Exception as e:
+            _retry_upload_state['failed'] += 1
+            _retry_upload_state['errors'].append(f"{filename}: {e}")
+
+        time.sleep(rate_limit)
+
+    _retry_upload_state['running'] = False
+    _retry_upload_state['current_file'] = None
+    _retry_upload_state['finished_at'] = datetime.now().isoformat()
+
+
+@app.route('/api/fleet/retry-uploads', methods=['POST'])
+@fleet_auth_required
+def api_fleet_retry_uploads():
+    """Retry uploading pending images that have metadata JSON.
+
+    Accepts JSON body (all optional):
+        rate_limit_seconds: delay between uploads (default: 5)
+        max_images: max images to retry (default: 0 = unlimited)
+        dry_run: if true, just report pending count (default: false)
+
+    Returns immediately; upload runs in background thread.
+    Use GET /api/fleet/retry-uploads/status to poll progress.
+    """
+    global _retry_upload_state
+
+    data = request.get_json(silent=True) or {}
+    rate_limit = data.get('rate_limit_seconds', 5)
+    max_images = data.get('max_images', 0)
+    dry_run = data.get('dry_run', False)
+
+    # Locate pending images
+    storage_base = Path(config.get('storage', {}).get(
+        'base_path', '/opt/sai-cam/storage'))
+    metadata_dir = storage_base / 'metadata'
+    uploaded_dir = storage_base / 'uploaded'
+
+    # Only retry images that have a corresponding metadata JSON
+    pending = []
+    for jpg in sorted(storage_base.glob('*.jpg')):
+        meta = metadata_dir / f"{jpg.name}.json"
+        if meta.exists() and jpg.stat().st_size > 0:
+            pending.append(jpg)
+
+    if dry_run:
+        # Also count images without metadata (for info)
+        all_jpgs = list(storage_base.glob('*.jpg'))
+        no_meta = len(all_jpgs) - len(pending)
+        empty = sum(1 for f in all_jpgs if f.stat().st_size == 0)
+        return jsonify({
+            'dry_run': True,
+            'pending_with_metadata': len(pending),
+            'pending_without_metadata': no_meta - empty,
+            'empty_files': empty,
+            'oldest': pending[0].name if pending else None,
+            'newest': pending[-1].name if pending else None,
+        })
+
+    # Check if already running
+    with _retry_upload_lock:
+        if _retry_upload_state['running']:
+            return jsonify({
+                'error': 'Retry upload already in progress',
+                'status': dict(_retry_upload_state),
+            }), 409
+
+    if not pending:
+        return jsonify({'ok': True, 'message': 'No pending images to retry',
+                        'total': 0})
+
+    if max_images > 0:
+        pending = pending[:max_images]
+
+    # Server config
+    server_url = config.get('server', {}).get('url', '')
+    auth_token = config.get('server', {}).get('auth_token', '')
+    ssl_verify = config.get('server', {}).get('ssl_verify', True)
+    srv_timeout = config.get('server', {}).get('timeout', 30)
+
+    if not server_url or not auth_token:
+        return jsonify({'error': 'Server URL or auth_token not configured'}), 500
+
+    # Reset state and launch background thread
+    with _retry_upload_lock:
+        _retry_upload_state = {
+            'running': True,
+            'total': len(pending),
+            'uploaded': 0,
+            'failed': 0,
+            'skipped': 0,
+            'current_file': None,
+            'started_at': datetime.now().isoformat(),
+            'finished_at': None,
+            'errors': [],
+        }
+
+    thread = Thread(
+        target=_do_retry_uploads,
+        args=(pending, server_url, auth_token, ssl_verify,
+              srv_timeout, rate_limit, str(storage_base), str(uploaded_dir)),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({
+        'ok': True,
+        'message': f'Retry started for {len(pending)} images',
+        'total': len(pending),
+        'rate_limit_seconds': rate_limit,
+    })
+
+
+@app.route('/api/fleet/retry-uploads/status')
+@fleet_auth_required
+def api_fleet_retry_uploads_status():
+    """Poll progress of a running retry-upload operation."""
+    return jsonify(_retry_upload_state)
 
 
 def main():

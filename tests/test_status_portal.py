@@ -611,6 +611,231 @@ class TestFleetRoutes:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Fleet Retry Uploads
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.smoke
+class TestFleetRetryUploads:
+
+    def _auth(self):
+        return {'Authorization': 'Bearer tok'}
+
+    def _setup_config(self):
+        status_portal.config['fleet'] = {'token': 'tok'}
+        status_portal.config['server'] = {
+            'url': 'https://api.test/upload',
+            'auth_token': 'srv-tok',
+            'ssl_verify': False,
+            'timeout': 30,
+        }
+
+    def _reset_retry_state(self):
+        status_portal._retry_upload_state = {
+            'running': False, 'total': 0, 'uploaded': 0,
+            'failed': 0, 'skipped': 0, 'current_file': None,
+            'started_at': None, 'finished_at': None, 'errors': [],
+        }
+
+    def test_dry_run_no_pending(self, client, tmp_path):
+        self._setup_config()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        (storage / 'metadata').mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={'dry_run': True})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['dry_run'] is True
+        assert data['pending_with_metadata'] == 0
+
+    def test_dry_run_with_pending(self, client, tmp_path):
+        self._setup_config()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        meta_dir = storage / 'metadata'
+        meta_dir.mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        # Create 3 images: 2 with metadata, 1 without
+        (storage / 'cam1_2026-02-23_10-00-00.jpg').write_bytes(b'\xff\xd8test1')
+        (meta_dir / 'cam1_2026-02-23_10-00-00.jpg.json').write_text(
+            '{"timestamp": "2026-02-23_10-00-00"}')
+
+        (storage / 'cam1_2026-02-23_10-05-00.jpg').write_bytes(b'\xff\xd8test2')
+        (meta_dir / 'cam1_2026-02-23_10-05-00.jpg.json').write_text(
+            '{"timestamp": "2026-02-23_10-05-00"}')
+
+        (storage / 'cam1_2025-12-01_10-00-00.jpg').write_bytes(b'\xff\xd8no_meta')
+
+        # Empty file (should not count)
+        (storage / 'cam1_2026-02-19_05-21-32.jpg').write_bytes(b'')
+        (meta_dir / 'cam1_2026-02-19_05-21-32.jpg.json').write_text('{}')
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={'dry_run': True})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['pending_with_metadata'] == 2
+        assert data['empty_files'] == 1
+
+    def test_retry_no_pending_returns_ok(self, client, tmp_path):
+        self._setup_config()
+        self._reset_retry_state()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        (storage / 'metadata').mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['total'] == 0
+
+    @patch('status_portal.Thread')
+    def test_retry_starts_background_thread(self, MockThread, client, tmp_path):
+        self._setup_config()
+        self._reset_retry_state()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        meta_dir = storage / 'metadata'
+        meta_dir.mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        (storage / 'cam1_2026-02-23_10-00-00.jpg').write_bytes(b'\xff\xd8img')
+        (meta_dir / 'cam1_2026-02-23_10-00-00.jpg.json').write_text(
+            '{"timestamp": "2026-02-23_10-00-00"}')
+
+        mock_thread = MagicMock()
+        MockThread.return_value = mock_thread
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={'rate_limit_seconds': 1})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['ok'] is True
+        assert data['total'] == 1
+        mock_thread.start.assert_called_once()
+
+    @patch('status_portal.Thread')
+    def test_retry_rejects_when_already_running(self, MockThread, client, tmp_path):
+        self._setup_config()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        meta_dir = storage / 'metadata'
+        meta_dir.mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        (storage / 'cam1_2026-02-23_10-00-00.jpg').write_bytes(b'\xff\xd8img')
+        (meta_dir / 'cam1_2026-02-23_10-00-00.jpg.json').write_text('{}')
+
+        # Simulate already running
+        status_portal._retry_upload_state = {
+            'running': True, 'total': 5, 'uploaded': 2,
+            'failed': 0, 'skipped': 0, 'current_file': 'test.jpg',
+            'started_at': '2026-02-23T10:00:00', 'finished_at': None,
+            'errors': [],
+        }
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={})
+        assert resp.status_code == 409
+
+    def test_retry_status_endpoint(self, client):
+        self._setup_config()
+        status_portal._retry_upload_state = {
+            'running': False, 'total': 10, 'uploaded': 8,
+            'failed': 1, 'skipped': 1, 'current_file': None,
+            'started_at': '2026-02-23T10:00:00',
+            'finished_at': '2026-02-23T10:01:00',
+            'errors': ['cam1_x.jpg: HTTP 500'],
+        }
+
+        resp = client.get('/api/fleet/retry-uploads/status',
+                         headers=self._auth())
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['total'] == 10
+        assert data['uploaded'] == 8
+        assert data['failed'] == 1
+
+    def test_retry_skips_images_without_metadata(self, client, tmp_path):
+        """Only images with a matching JSON are retried."""
+        self._setup_config()
+        self._reset_retry_state()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        meta_dir = storage / 'metadata'
+        meta_dir.mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        # Image WITHOUT metadata — should be excluded
+        (storage / 'cam1_2025-12-01_10-00-00.jpg').write_bytes(b'\xff\xd8old')
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={})
+        assert resp.status_code == 200
+        assert resp.get_json()['total'] == 0
+
+    @patch('status_portal.Thread')
+    def test_retry_respects_max_images(self, MockThread, client, tmp_path):
+        self._setup_config()
+        self._reset_retry_state()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        meta_dir = storage / 'metadata'
+        meta_dir.mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        for i in range(5):
+            name = f'cam1_2026-02-23_10-{i:02d}-00.jpg'
+            (storage / name).write_bytes(b'\xff\xd8img')
+            (meta_dir / f'{name}.json').write_text('{}')
+
+        MockThread.return_value = MagicMock()
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={'max_images': 2})
+        assert resp.status_code == 200
+        assert resp.get_json()['total'] == 2
+
+    def test_retry_requires_server_config(self, client, tmp_path):
+        status_portal.config['fleet'] = {'token': 'tok'}
+        status_portal.config['server'] = {}  # No URL or token
+        self._reset_retry_state()
+        storage = tmp_path / 'storage'
+        storage.mkdir()
+        meta_dir = storage / 'metadata'
+        meta_dir.mkdir()
+        (storage / 'uploaded').mkdir()
+        status_portal.config['storage'] = {'base_path': str(storage)}
+
+        (storage / 'cam1_2026-02-23_10-00-00.jpg').write_bytes(b'\xff\xd8img')
+        (meta_dir / 'cam1_2026-02-23_10-00-00.jpg.json').write_text('{}')
+
+        resp = client.post('/api/fleet/retry-uploads',
+                          headers=self._auth(),
+                          json={})
+        assert resp.status_code == 500
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Health Sub-Routes
 # ──────────────────────────────────────────────────────────────────────────────
 

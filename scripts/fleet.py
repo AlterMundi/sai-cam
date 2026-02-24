@@ -454,6 +454,134 @@ class FleetCLI:
                 print(f"  {name:<14} {old:<12} {'?':<12} {YELLOW}pending{RESET}")
         print()
 
+    def cmd_retry_uploads(self, names, dry_run=False, max_images=0,
+                          rate_limit=5, wait=True):
+        """Retry uploading pending images on specified nodes."""
+        nodes = self.resolve_nodes(names)
+        mode = "dry-run" if dry_run else "retry"
+        print(f"\n{BOLD}Retry uploads ({mode}) on {len(nodes)} node(s)…{RESET}\n")
+
+        body = {
+            'rate_limit_seconds': rate_limit,
+            'max_images': max_images,
+            'dry_run': dry_run,
+        }
+
+        def trigger(node):
+            resp = self._request(node, 'POST', '/api/fleet/retry-uploads',
+                                 json=body, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+
+        results = self.parallel(nodes, trigger)
+        results.sort(key=lambda x: x[0]['name'])
+
+        if dry_run:
+            print(f"  {'Node':<14} {'With meta':<12} {'No meta':<10} "
+                  f"{'Empty':<8} {'Oldest':<36} {'Newest'}")
+            print(f"  {'─'*14} {'─'*12} {'─'*10} {'─'*8} {'─'*36} {'─'*36}")
+            for node, result in results:
+                name = node['name']
+                if isinstance(result, Exception):
+                    print(f"  {fail(name)} {result}")
+                else:
+                    wm = result.get('pending_with_metadata', 0)
+                    nm = result.get('pending_without_metadata', 0)
+                    emp = result.get('empty_files', 0)
+                    oldest = result.get('oldest', '--') or '--'
+                    newest = result.get('newest', '--') or '--'
+                    print(f"  {name:<14} {wm:<12} {nm:<10} {emp:<8} "
+                          f"{oldest:<36} {newest}")
+            print()
+            return
+
+        triggered = []
+        for node, result in results:
+            name = node['name']
+            if isinstance(result, Exception):
+                print(f"  {fail(name)} {result}")
+            elif 'error' in result:
+                print(f"  {fail(name)} {result['error']}")
+            else:
+                total = result.get('total', 0)
+                rate = result.get('rate_limit_seconds', rate_limit)
+                print(f"  {ok(name)} retry started: {total} images "
+                      f"(~{rate}s between uploads)")
+                if total > 0:
+                    triggered.append(node)
+
+        if not wait or not triggered:
+            print()
+            return
+
+        # Poll for completion
+        est_time = max(
+            r.get('total', 0) * rate_limit
+            for _, r in results if not isinstance(r, Exception)
+        )
+        print(f"\n  Polling progress (est. {_fmt_duration(est_time)})…",
+              end='', flush=True)
+
+        poll_timeout = max(est_time * 2, 120)
+        deadline = time.time() + poll_timeout
+        final = {}
+        time.sleep(min(rate_limit, 5))
+
+        while time.time() < deadline:
+            remaining = [n for n in triggered if n['name'] not in final]
+            if not remaining:
+                break
+
+            def poll(node):
+                resp = self._request(node, 'GET',
+                                     '/api/fleet/retry-uploads/status',
+                                     timeout=10)
+                resp.raise_for_status()
+                return resp.json()
+
+            poll_results = self.parallel(remaining, poll)
+            for node, result in poll_results:
+                if isinstance(result, Exception):
+                    sys.stdout.write('x')
+                    sys.stdout.flush()
+                    continue
+                if not result.get('running', False):
+                    final[node['name']] = result
+                    sys.stdout.write(f"{GREEN}✓{RESET}")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write('.')
+                    sys.stdout.flush()
+
+            if [n for n in triggered if n['name'] not in final]:
+                time.sleep(min(rate_limit, 10))
+
+        print()
+
+        # Summary
+        print(f"\n{BOLD}Retry Upload Summary{RESET}\n")
+        print(f"  {'Node':<14} {'Total':<8} {'Uploaded':<10} "
+              f"{'Failed':<8} {'Skipped':<8}")
+        print(f"  {'─'*14} {'─'*8} {'─'*10} {'─'*8} {'─'*8}")
+        for node in triggered:
+            name = node['name']
+            info = final.get(name, {})
+            total = info.get('total', '?')
+            uploaded = info.get('uploaded', '?')
+            failed = info.get('failed', '?')
+            skipped = info.get('skipped', '?')
+            fail_str = f"{RED}{failed}{RESET}" if failed else '0'
+            print(f"  {name:<14} {total:<8} "
+                  f"{GREEN}{uploaded}{RESET}{'':>{10-len(str(uploaded))}} "
+                  f"{fail_str}{'':>{8-len(str(failed))}} {skipped}")
+            errors = info.get('errors', [])
+            if errors:
+                for err in errors[:5]:
+                    print(f"  {'':>16}{DIM}{err}{RESET}")
+                if len(errors) > 5:
+                    print(f"  {'':>16}{DIM}… and {len(errors)-5} more{RESET}")
+        print()
+
     def cmd_status(self, names):
         """Show update status of nodes."""
         nodes = self.resolve_nodes(names)
@@ -590,6 +718,8 @@ def main():
   %(prog)s --reboot saicam3                   Reboot a node
   %(prog)s --set updates.channel=beta saicam3 Set config key
   %(prog)s --canary                           Canary rollout workflow
+  %(prog)s --retry-uploads saicam3 saicam7    Retry pending uploads on nodes
+  %(prog)s --retry-uploads --dry-run ALL      Show pending counts without uploading
 """)
 
     parser.add_argument('--registry', default=None,
@@ -610,8 +740,16 @@ def main():
                         help='Show update status of nodes (or ALL)')
     parser.add_argument('--canary', action='store_true',
                         help='Canary rollout: update canary → verify → roll to fleet')
+    parser.add_argument('--retry-uploads', nargs='*', metavar='NODE',
+                        help='Retry uploading pending images on nodes (or ALL)')
+    parser.add_argument('--max-images', type=int, default=0, dest='max_images',
+                        help='Max images to retry per node (default: 0 = unlimited)')
+    parser.add_argument('--rate-limit', type=int, default=5, dest='rate_limit',
+                        help='Seconds between retry uploads (default: 5)')
+    parser.add_argument('--dry-run', action='store_true', dest='dry_run',
+                        help='Show pending counts without uploading')
     parser.add_argument('--no-wait', action='store_true', dest='no_wait',
-                        help="Don't poll after --update, just trigger and exit")
+                        help="Don't poll after --update/--retry-uploads, just trigger and exit")
 
     args = parser.parse_args()
 
@@ -642,6 +780,12 @@ def main():
         key_value = args.set[0]
         node_names = args.set[1:] or ['ALL']
         cli.cmd_set(key_value, node_names)
+    elif args.retry_uploads is not None:
+        cli.cmd_retry_uploads(args.retry_uploads or ['ALL'],
+                              dry_run=args.dry_run,
+                              max_images=args.max_images,
+                              rate_limit=args.rate_limit,
+                              wait=not args.no_wait)
     elif args.canary:
         cli.cmd_canary()
     else:
