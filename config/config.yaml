@@ -145,6 +145,8 @@ ipfs:
   cid_version: 1
   pin: true
   cleanup_grace_hours: 72
+  max_retries: 5
+  retry_backoff_seconds: 10
 
 # Kafka Integration (optional - used with IPFS for CID publishing)
 kafka:
@@ -157,3 +159,5 @@ kafka:
   sasl_mechanism: 'PLAIN'
   sasl_username: ''
   sasl_password: ''
+  max_retries: 5
+  retry_backoff_seconds: 10

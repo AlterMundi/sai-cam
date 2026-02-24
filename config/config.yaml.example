@@ -166,6 +166,8 @@ ipfs:
   cid_version: 1               # CIDv1 (base32, recommended) or 0 (base58)
   pin: true                    # Pin uploads so they are not garbage-collected
   cleanup_grace_hours: 72      # Hours to keep local copy after successful IPFS add
+  max_retries: 5               # Per-image retry attempts before marking failed
+  retry_backoff_seconds: 10    # Exponential backoff base for per-image retries
 
 # Kafka Integration (optional - used with IPFS for CID publishing)
 # Publishes a CID-ready event to a Kafka topic for each image uploaded to IPFS.
@@ -180,3 +182,5 @@ kafka:
   sasl_mechanism: 'PLAIN'          # 'PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512'
   sasl_username: ''                # SASL username (leave empty for unauthenticated)
   sasl_password: ''                # SASL password
+  max_retries: 5                   # Per-image retry attempts before marking failed
+  retry_backoff_seconds: 10        # Exponential backoff base for per-image retries

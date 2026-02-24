@@ -10,6 +10,7 @@ import yaml
 import signal
 import argparse
 import queue
+from collections import deque
 from datetime import datetime
 from threading import Thread, Lock, Event
 from queue import Queue
@@ -202,6 +203,10 @@ class CameraInstance:
                 img_size = len(image_data) / 1024
                 self.logger.debug(f"Camera {self.camera_id}: Captured {filename} ({img_size:.1f}KB)")
 
+                metadata['filename'] = filename
+                metadata['image_size_bytes'] = len(image_data)
+                metadata['content_type'] = 'image/jpeg'
+                metadata['epoch_ms'] = int(time.time() * 1000)
                 self.storage_manager.store_image(image_data, filename, metadata)
                 self.upload_queue.put((filename, self.camera_id))
 
@@ -325,7 +330,8 @@ class CameraService:
             max_size_gb=storage_config['max_size_gb'],
             cleanup_threshold_gb=storage_config['cleanup_threshold_gb'],
             retention_days=storage_config['retention_days'],
-            logger=self.logger
+            logger=self.logger,
+            cleanup_grace_hours=self.config.get('ipfs', {}).get('cleanup_grace_hours', 72),
         )
 
     def setup_queues(self):
@@ -352,6 +358,30 @@ class CameraService:
         self._kafka_failures = 0
         self._kafka_backoff = 300
         self._kafka_circuit_open_until = 0
+
+        # Retry policy knobs
+        ipfs_cfg = self.config.get('ipfs', {})
+        kafka_cfg = self.config.get('kafka', {})
+        self._ipfs_max_retries = max(1, int(ipfs_cfg.get('max_retries', 5)))
+        self._kafka_max_retries = max(1, int(kafka_cfg.get('max_retries', 5)))
+        self._ipfs_retry_backoff_seconds = max(1, int(ipfs_cfg.get('retry_backoff_seconds', 10)))
+        self._kafka_retry_backoff_seconds = max(1, int(kafka_cfg.get('retry_backoff_seconds', 10)))
+
+        # Per-file retry state and deferred queue to avoid drops under queue pressure
+        self._ipfs_retry_state = {}
+        self._ipfs_deferred = deque(maxlen=2000)
+
+        # Health counters consumed by status portal
+        self._ipfs_stats = {
+            'success_count': 0,
+            'fail_count': 0,
+            'last_error': None,
+        }
+        self._kafka_stats = {
+            'success_count': 0,
+            'fail_count': 0,
+            'last_error': None,
+        }
 
     def setup_ssl(self):
         """Configure SSL context for secure communications"""
@@ -615,25 +645,129 @@ class CameraService:
                 self.logger.error(f"Upload error: {str(e)}", exc_info=True)
                 time.sleep(1)
 
+    def _integration_retry_state(self, filename):
+        """Get or initialize per-file retry state."""
+        return self._ipfs_retry_state.setdefault(filename, {
+            'ipfs_attempts': 0,
+            'kafka_attempts': 0,
+            'next_eligible_at': 0,
+        })
+
+    def _enqueue_ipfs_item(self, item):
+        """Try to enqueue immediately, then fallback to deferred memory buffer."""
+        try:
+            self.ipfs_queue.put_nowait(item)
+            return True
+        except queue.Full:
+            if len(self._ipfs_deferred) < self._ipfs_deferred.maxlen:
+                self._ipfs_deferred.append(item)
+                return True
+            return False
+
+    def _drain_ipfs_deferred(self):
+        """Move deferred items back into the processing queue when there is capacity."""
+        while self._ipfs_deferred:
+            try:
+                self.ipfs_queue.put_nowait(self._ipfs_deferred[0])
+                self._ipfs_deferred.popleft()
+            except queue.Full:
+                break
+
+    def _schedule_retry(self, filename, camera_id, stage, error_message):
+        """Schedule a retry for IPFS or Kafka stage; return True if requeued."""
+        state = self._integration_retry_state(filename)
+        now = time.time()
+        if stage == 'ipfs':
+            state['ipfs_attempts'] += 1
+            attempts = state['ipfs_attempts']
+            max_retries = self._ipfs_max_retries
+            backoff_base = self._ipfs_retry_backoff_seconds
+            metadata_patch = {
+                'ipfs_status': 'pending',
+                'ipfs_error': error_message,
+                'ipfs_attempts': attempts,
+            }
+        else:
+            state['kafka_attempts'] += 1
+            attempts = state['kafka_attempts']
+            max_retries = self._kafka_max_retries
+            backoff_base = self._kafka_retry_backoff_seconds
+            metadata_patch = {
+                'kafka_status': 'pending',
+                'kafka_error': error_message,
+                'kafka_attempts': attempts,
+            }
+
+        if attempts >= max_retries:
+            if stage == 'ipfs':
+                self._ipfs_stats['fail_count'] += 1
+                self._ipfs_stats['last_error'] = error_message
+                metadata_patch['ipfs_status'] = 'failed'
+            else:
+                self._kafka_stats['fail_count'] += 1
+                self._kafka_stats['last_error'] = error_message
+                metadata_patch['kafka_status'] = 'failed'
+            self.storage_manager.update_metadata_fields(filename, metadata_patch)
+            self._ipfs_retry_state.pop(filename, None)
+            self.logger.warning(
+                "%s terminal failure for %s after %d attempts: %s",
+                stage.upper(),
+                filename,
+                attempts,
+                error_message,
+            )
+            return False
+
+        delay = min(backoff_base * (2 ** (attempts - 1)), 3600)
+        state['next_eligible_at'] = now + delay
+        self.storage_manager.update_metadata_fields(filename, metadata_patch)
+        if not self._enqueue_ipfs_item((filename, camera_id)):
+            self.logger.error(
+                "Cannot requeue %s after %s error; deferred buffer full",
+                filename,
+                stage.upper(),
+            )
+            fail_patch = {'kafka_status': 'failed', 'kafka_error': 'requeue buffer full'} if stage == 'kafka' else {'ipfs_status': 'failed', 'ipfs_error': 'requeue buffer full'}
+            self.storage_manager.update_metadata_fields(filename, fail_patch)
+            self._ipfs_retry_state.pop(filename, None)
+            return False
+        return True
+
     def process_ipfs_queue(self):
-        """Process images from the IPFS queue — runs in a dedicated thread"""
+        """Process images from the IPFS queue — runs in a dedicated thread."""
         MAX_BACKOFF = 3600  # 60 min cap
 
         while self.running:
             try:
+                self._drain_ipfs_deferred()
                 try:
                     filename, camera_id = self.ipfs_queue.get(timeout=1)
                 except queue.Empty:
                     continue
 
-                # IPFS circuit breaker check
+                state = self._integration_retry_state(filename)
                 now = time.time()
+                if now < state['next_eligible_at']:
+                    self._enqueue_ipfs_item((filename, camera_id))
+                    time.sleep(min(state['next_eligible_at'] - now, 1))
+                    continue
+
+                # IPFS circuit breaker check
                 if now < self._ipfs_circuit_open_until:
+                    self._ipfs_stats['last_error'] = "ipfs circuit breaker open"
                     self.logger.debug(
-                        "IPFS circuit open, skipping %s (retry in %.0fs)",
+                        "IPFS circuit open, deferring %s (retry in %.0fs)",
                         filename,
                         self._ipfs_circuit_open_until - now
                     )
+                    state['next_eligible_at'] = self._ipfs_circuit_open_until
+                    if not self._enqueue_ipfs_item((filename, camera_id)):
+                        self._ipfs_stats['fail_count'] += 1
+                        self.storage_manager.update_metadata_fields(filename, {
+                            'ipfs_status': 'failed',
+                            'ipfs_error': 'requeue failed while ipfs circuit was open',
+                        })
+                        self._ipfs_retry_state.pop(filename, None)
                     continue
 
                 # Read image from disk
@@ -641,34 +775,67 @@ class CameraService:
                     image_bytes = self.storage_manager.read_image(filename)
                 except FileNotFoundError:
                     self.logger.warning("IPFS processor: image not found on disk, skipping %s", filename)
+                    self._ipfs_stats['fail_count'] += 1
+                    self._ipfs_stats['last_error'] = "image not found"
+                    self.storage_manager.update_metadata_fields(filename, {
+                        'ipfs_status': 'failed',
+                        'ipfs_error': 'image not found on disk',
+                    })
+                    self._ipfs_retry_state.pop(filename, None)
                     continue
 
-                # Upload to IPFS
-                cid = self.ipfs_client.add_image(image_bytes, filename)
-                if cid is None:
-                    self._ipfs_failures += 1
-                    if self._ipfs_failures >= 3:
-                        self._ipfs_circuit_open_until = time.time() + self._ipfs_backoff
-                        self.logger.warning(
-                            "IPFS circuit opened after %d failures; backoff=%ds",
-                            self._ipfs_failures,
-                            self._ipfs_backoff
-                        )
-                        self._ipfs_backoff = min(self._ipfs_backoff * 2, MAX_BACKOFF)
-                    continue
+                metadata = self.storage_manager.read_metadata(filename)
+                cid = metadata.get('ipfs_cid')
+                if not cid:
+                    # Upload to IPFS
+                    cid = self.ipfs_client.add_image(image_bytes, filename)
+                    if cid is None:
+                        self._ipfs_failures += 1
+                        self._ipfs_stats['last_error'] = "ipfs add failed"
+                        if self._ipfs_failures >= 3:
+                            self._ipfs_circuit_open_until = time.time() + self._ipfs_backoff
+                            self.logger.warning(
+                                "IPFS circuit opened after %d failures; backoff=%ds",
+                                self._ipfs_failures,
+                                self._ipfs_backoff
+                            )
+                            self._ipfs_backoff = min(self._ipfs_backoff * 2, MAX_BACKOFF)
+                        self._schedule_retry(filename, camera_id, 'ipfs', 'ipfs add failed')
+                        continue
 
-                # Success: reset IPFS circuit breaker
-                self._ipfs_failures = 0
-                self._ipfs_backoff = 300
+                    # Success: reset IPFS circuit breaker
+                    self._ipfs_failures = 0
+                    self._ipfs_backoff = 300
 
-                # Persist CID to metadata
-                self.storage_manager.update_metadata_fields(filename, {'ipfs_cid': cid})
+                    # Persist CID to metadata
+                    self.storage_manager.update_metadata_fields(filename, {
+                        'ipfs_cid': cid,
+                        'ipfs_status': 'success',
+                        'ipfs_error': None,
+                        'ipfs_attempts': 0,
+                    })
+                    self._ipfs_stats['success_count'] += 1
+                    state['ipfs_attempts'] = 0
+                    state['next_eligible_at'] = 0
 
                 # Publish to Kafka if enabled
                 if self._kafka_enabled and hasattr(self, 'kafka_publisher'):
+                    if metadata.get('kafka_published'):
+                        self._ipfs_retry_state.pop(filename, None)
+                        continue
+
                     now = time.time()
                     if now < self._kafka_circuit_open_until:
-                        self.logger.debug("Kafka circuit open, skipping publish for %s", filename)
+                        self._kafka_stats['last_error'] = "kafka circuit breaker open"
+                        self.logger.debug("Kafka circuit open, deferring publish for %s", filename)
+                        state['next_eligible_at'] = self._kafka_circuit_open_until
+                        if not self._enqueue_ipfs_item((filename, camera_id)):
+                            self._kafka_stats['fail_count'] += 1
+                            self.storage_manager.update_metadata_fields(filename, {
+                                'kafka_status': 'failed',
+                                'kafka_error': 'requeue failed while kafka circuit was open',
+                            })
+                            self._ipfs_retry_state.pop(filename, None)
                         continue
 
                     metadata = self.storage_manager.read_metadata(filename)
@@ -676,9 +843,16 @@ class CameraService:
                     if kafka_ok:
                         self._kafka_failures = 0
                         self._kafka_backoff = 300
-                        self.storage_manager.update_metadata_fields(filename, {'kafka_published': True})
+                        state['kafka_attempts'] = 0
+                        self.storage_manager.update_metadata_fields(filename, {
+                            'kafka_published': True,
+                            'kafka_status': 'success',
+                            'kafka_error': None,
+                        })
+                        self._kafka_stats['success_count'] += 1
                     else:
                         self._kafka_failures += 1
+                        self._kafka_stats['last_error'] = "kafka publish failed"
                         if self._kafka_failures >= 3:
                             self._kafka_circuit_open_until = time.time() + self._kafka_backoff
                             self.logger.warning(
@@ -687,8 +861,17 @@ class CameraService:
                                 self._kafka_backoff
                             )
                             self._kafka_backoff = min(self._kafka_backoff * 2, MAX_BACKOFF)
+                        self._schedule_retry(filename, camera_id, 'kafka', 'kafka publish failed')
+                        continue
+
+                elif not self._kafka_enabled:
+                    self.storage_manager.update_metadata_fields(filename, {'kafka_status': 'disabled'})
+
+                self._ipfs_retry_state.pop(filename, None)
 
             except Exception as e:
+                self._ipfs_stats['fail_count'] += 1
+                self._ipfs_stats['last_error'] = str(e)
                 self.logger.warning(f"IPFS processor error: {e}", exc_info=True)
 
     def setup_monitoring(self):
@@ -962,6 +1145,22 @@ class CameraService:
                 }
                 for cam_id, (config, attempts, next_retry) in self.failed_cameras.items()
             },
+
+            # Integration health for fleet status API
+            'ipfs': {
+                'queue_depth': self.ipfs_queue.qsize() + len(self._ipfs_deferred),
+                'success_count': self._ipfs_stats['success_count'],
+                'fail_count': self._ipfs_stats['fail_count'],
+                'circuit_breaker_open': time.time() < self._ipfs_circuit_open_until,
+                'last_error': self._ipfs_stats['last_error'],
+            },
+            'kafka': {
+                'queue_depth': self.ipfs_queue.qsize() + len(self._ipfs_deferred) if self._kafka_enabled else 0,
+                'success_count': self._kafka_stats['success_count'],
+                'fail_count': self._kafka_stats['fail_count'],
+                'circuit_breaker_open': time.time() < self._kafka_circuit_open_until,
+                'last_error': self._kafka_stats['last_error'],
+            },
         }
 
     def _handle_command(self, cmd):
@@ -1060,7 +1259,7 @@ class _MetaLockManager:
 
 class StorageManager:
     def __init__(self, base_path, max_size_gb, cleanup_threshold_gb,
-                 retention_days, logger):
+                 retention_days, logger, cleanup_grace_hours=72):
         """Initialize the storage manager"""
         self.base_path = Path(base_path)
         self.max_size_gb = max_size_gb
@@ -1080,7 +1279,10 @@ class StorageManager:
         self.metadata_path.mkdir(parents=True, exist_ok=True)
 
         # Grace period (hours) before cleanup deletes files without IPFS CID or Kafka publish
-        self.cleanup_grace_hours = 72
+        try:
+            self.cleanup_grace_hours = max(0, int(cleanup_grace_hours))
+        except (TypeError, ValueError):
+            self.cleanup_grace_hours = 72
 
     def get_current_size_gb(self):
         """Calculate current storage usage"""
@@ -1185,7 +1387,13 @@ class StorageManager:
             # Store metadata if provided
             if metadata:
                 metadata.setdefault('ipfs_cid', None)
+                metadata.setdefault('ipfs_status', 'pending')
+                metadata.setdefault('ipfs_error', None)
+                metadata.setdefault('ipfs_attempts', 0)
                 metadata.setdefault('kafka_published', False)
+                metadata.setdefault('kafka_status', 'pending')
+                metadata.setdefault('kafka_error', None)
+                metadata.setdefault('kafka_attempts', 0)
                 metadata_file = self.metadata_path / f"{filename}.json"
                 with open(metadata_file, 'w') as f:
                     json.dump(metadata, f)
@@ -1493,4 +1701,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

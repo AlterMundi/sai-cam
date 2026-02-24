@@ -34,12 +34,19 @@ class IPFSClient:
         self.logger = logger
         self.api_url = config.get("api_url", "http://127.0.0.1:5001/api/v0").rstrip("/")
         self.timeout = int(config.get("timeout", 60))
+        try:
+            cid_version = int(config.get("cid_version", 1))
+        except (TypeError, ValueError):
+            cid_version = 1
+        self.cid_version = 1 if cid_version not in (0, 1) else cid_version
+        self.pin = bool(config.get("pin", True))
         # 'cluster' backend proxies the Kubo API on port 9095 — same /api/v0/add path.
         # We just note the backend for logging; the caller is responsible for setting
         # api_url to the correct endpoint+port.
         self.backend = config.get("backend", "kubo")
         self.logger.info(
-            f"IPFSClient initialised: backend={self.backend} api_url={self.api_url} timeout={self.timeout}s"
+            f"IPFSClient initialised: backend={self.backend} api_url={self.api_url} timeout={self.timeout}s "
+            f"cid_version={self.cid_version} pin={self.pin}"
         )
 
     # ------------------------------------------------------------------
@@ -58,8 +65,8 @@ class IPFSClient:
         """
         url = f"{self.api_url}/add"
         params = {
-            "cid-version": "1",
-            "pin": "true",
+            "cid-version": str(self.cid_version),
+            "pin": "true" if self.pin else "false",
             "quieter": "true",
             "progress": "false",
         }

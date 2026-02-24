@@ -1286,6 +1286,11 @@ def api_fleet_ping():
 def api_fleet_status():
     """Fleet node status — node health + IPFS/Kafka observability flags."""
     health = query_health_socket() or {}
+    def _as_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
 
     ipfs_cfg = config.get('ipfs', {})
     kafka_cfg = config.get('kafka', {})
@@ -1302,24 +1307,40 @@ def api_fleet_status():
         'kafka_enabled': kafka_enabled,
     }
 
-    # Pull IPFS/Kafka observability counters from camera service health socket
-    if ipfs_enabled or kafka_enabled:
-        ipfs_health = health.get('ipfs', {})
-        kafka_health = health.get('kafka', {})
-        result['ipfs'] = {
-            'queue_depth': ipfs_health.get('queue_depth', 0),
-            'success_count': ipfs_health.get('success_count', 0),
-            'fail_count': ipfs_health.get('fail_count', 0),
-            'circuit_breaker_open': ipfs_health.get('circuit_breaker_open', False),
-            'last_error': ipfs_health.get('last_error'),
-        }
-        result['kafka'] = {
-            'queue_depth': kafka_health.get('queue_depth', 0),
-            'success_count': kafka_health.get('success_count', 0),
-            'fail_count': kafka_health.get('fail_count', 0),
-            'circuit_breaker_open': kafka_health.get('circuit_breaker_open', False),
-            'last_error': kafka_health.get('last_error'),
-        }
+    ipfs_health = health.get('ipfs', {})
+    kafka_health = health.get('kafka', {})
+
+    ipfs_success = _as_int(ipfs_health.get('success_count', 0))
+    ipfs_fail = _as_int(ipfs_health.get('fail_count', 0))
+    ipfs_queue = _as_int(ipfs_health.get('queue_depth', 0))
+    kafka_success = _as_int(kafka_health.get('success_count', 0))
+    kafka_fail = _as_int(kafka_health.get('fail_count', 0))
+    kafka_queue = _as_int(kafka_health.get('queue_depth', 0))
+
+    ipfs_state = 'disabled'
+    if ipfs_enabled:
+        ipfs_state = 'idle' if (ipfs_success + ipfs_fail + ipfs_queue) == 0 else 'active'
+
+    kafka_state = 'disabled'
+    if kafka_enabled:
+        kafka_state = 'idle' if (kafka_success + kafka_fail + kafka_queue) == 0 else 'active'
+
+    result['ipfs'] = {
+        'state': ipfs_state,
+        'queue_depth': ipfs_queue if ipfs_enabled else 0,
+        'success_count': ipfs_success if ipfs_enabled else 0,
+        'fail_count': ipfs_fail if ipfs_enabled else 0,
+        'circuit_breaker_open': bool(ipfs_health.get('circuit_breaker_open', False)) if ipfs_enabled else False,
+        'last_error': ipfs_health.get('last_error') if ipfs_enabled else None,
+    }
+    result['kafka'] = {
+        'state': kafka_state,
+        'queue_depth': kafka_queue if kafka_enabled else 0,
+        'success_count': kafka_success if kafka_enabled else 0,
+        'fail_count': kafka_fail if kafka_enabled else 0,
+        'circuit_breaker_open': bool(kafka_health.get('circuit_breaker_open', False)) if kafka_enabled else False,
+        'last_error': kafka_health.get('last_error') if kafka_enabled else None,
+    }
 
     return jsonify(result)
 
