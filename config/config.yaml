@@ -134,3 +134,26 @@ fleet:
     - updates.channel
     - updates.enabled
     - logging.level
+
+# IPFS Integration (optional - disabled by default)
+ipfs:
+  enabled: false
+  # Port 5001 for Kubo direct, 9095 for IPFS Cluster proxy
+  api_url: 'http://ZEROTIER_IP:5001/api/v0'
+  backend: 'kubo'              # 'kubo' or 'cluster'
+  timeout: 60
+  cid_version: 1
+  pin: true
+  cleanup_grace_hours: 72
+
+# Kafka Integration (optional - used with IPFS for CID publishing)
+kafka:
+  enabled: false
+  brokers:
+    - 'kafka.altermundi.net:9092'
+  topic: 'sai-cam-ipfs-cids'
+  client_id: 'sai-cam-node-01'
+  security_protocol: 'SASL_SSL'
+  sasl_mechanism: 'PLAIN'
+  sasl_username: ''
+  sasl_password: ''

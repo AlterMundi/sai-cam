@@ -151,3 +151,32 @@ metrics:
   remote_write_url: 'https://grafana2.altermundi.net/vmwrite'
   remote_write_user: 'vmwriter'
   remote_write_password: ''
+
+# IPFS Integration (optional - disabled by default)
+# Uploads captured images to IPFS via Kubo HTTP API or an IPFS Cluster proxy.
+# Requires a remote IPFS node reachable over ZeroTier (or other VPN).
+ipfs:
+  enabled: false
+  # api_url: base URL of the IPFS HTTP API endpoint
+  #   Port 5001 — Kubo (go-ipfs) direct API
+  #   Port 9095 — IPFS Cluster proxy (same /api/v0 path, with replication)
+  api_url: 'http://ZEROTIER_IP:5001/api/v0'
+  backend: 'kubo'              # 'kubo' (default) or 'cluster'
+  timeout: 60                  # Request timeout in seconds
+  cid_version: 1               # CIDv1 (base32, recommended) or 0 (base58)
+  pin: true                    # Pin uploads so they are not garbage-collected
+  cleanup_grace_hours: 72      # Hours to keep local copy after successful IPFS add
+
+# Kafka Integration (optional - used with IPFS for CID publishing)
+# Publishes a CID-ready event to a Kafka topic for each image uploaded to IPFS.
+# Requires kafka-python-ng (installed automatically when kafka.enabled: true).
+kafka:
+  enabled: false
+  brokers:
+    - 'kafka.altermundi.net:9092'  # Kafka bootstrap broker(s)
+  topic: 'sai-cam-ipfs-cids'      # Topic to publish CID events to
+  client_id: 'sai-cam-node-01'    # Kafka client identifier (set to device.id)
+  security_protocol: 'SASL_SSL'   # 'PLAINTEXT', 'SSL', 'SASL_PLAINTEXT', 'SASL_SSL'
+  sasl_mechanism: 'PLAIN'          # 'PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512'
+  sasl_username: ''                # SASL username (leave empty for unauthenticated)
+  sasl_password: ''                # SASL password

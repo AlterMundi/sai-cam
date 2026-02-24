@@ -9,6 +9,7 @@ import os
 import yaml
 import signal
 import argparse
+import queue
 from datetime import datetime
 from threading import Thread, Lock, Event
 from queue import Queue
@@ -36,6 +37,8 @@ for _path in [_current_dir, _parent_dir]:
 from logging_utils import RateLimitedLogger, CameraStateTracker
 
 from version import VERSION
+from ipfs_client import IPFSClient
+from kafka_publisher import KafkaPublisher
 
 # Force FFMPEG to use TCP transport for all RTSP connections
 # Let codec auto-detect - cameras may use H.264 or H.265
@@ -44,13 +47,15 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 class CameraInstance:
     """Represents a single camera instance with its own configuration and state"""
 
-    def __init__(self, camera_id, camera_config, global_config, logger, storage_manager, upload_queue):
+    def __init__(self, camera_id, camera_config, global_config, logger, storage_manager, upload_queue, ipfs_queue=None, ipfs_enabled=False):
         self.camera_id = camera_id
         self.config = camera_config
         self.global_config = global_config
         self.logger = logger
         self.storage_manager = storage_manager
         self.upload_queue = upload_queue
+        self.ipfs_queue = ipfs_queue
+        self._ipfs_enabled = ipfs_enabled
         self.running = True
         self.force_capture_event = Event()
 
@@ -198,7 +203,13 @@ class CameraInstance:
                 self.logger.debug(f"Camera {self.camera_id}: Captured {filename} ({img_size:.1f}KB)")
 
                 self.storage_manager.store_image(image_data, filename, metadata)
-                self.upload_queue.put((filename, image_data, metadata, self.camera_id))
+                self.upload_queue.put((filename, self.camera_id))
+
+                if self._ipfs_enabled:
+                    try:
+                        self.ipfs_queue.put_nowait((filename, self.camera_id))
+                    except queue.Full:
+                        self.logger.warning("IPFS queue full, skipping %s (retry will recover)", filename)
 
                 # Update timestamp for next capture
                 self.timestamp_last_image = current_time
@@ -321,7 +332,26 @@ class CameraService:
         """Initialize queue system for image processing"""
         self.image_queue = Queue(maxsize=100)
         self.upload_queue = Queue(maxsize=1000)
+        self.ipfs_queue = Queue(maxsize=1000)
         self.running = True
+
+        # IPFS / Kafka integration — gated by config flags
+        self._ipfs_enabled = self.config.get('ipfs', {}).get('enabled', False)
+        self._kafka_enabled = self.config.get('kafka', {}).get('enabled', False)
+
+        if self._ipfs_enabled:
+            self.ipfs_client = IPFSClient(self.config['ipfs'], self.logger)
+        if self._kafka_enabled:
+            self.kafka_publisher = KafkaPublisher(self.config['kafka'], self.logger)
+
+        # Circuit breaker state for IPFS
+        self._ipfs_failures = 0
+        self._ipfs_backoff = 300
+        self._ipfs_circuit_open_until = 0
+        # Circuit breaker state for Kafka
+        self._kafka_failures = 0
+        self._kafka_backoff = 300
+        self._kafka_circuit_open_until = 0
 
     def setup_ssl(self):
         """Configure SSL context for secure communications"""
@@ -407,7 +437,9 @@ class CameraService:
                 global_config=self.config,
                 logger=self.logger,
                 storage_manager=self.storage_manager,
-                upload_queue=self.upload_queue
+                upload_queue=self.upload_queue,
+                ipfs_queue=self.ipfs_queue,
+                ipfs_enabled=self._ipfs_enabled
             )
 
             # Initialize camera
@@ -542,7 +574,15 @@ class CameraService:
         while self.running:
             try:
                 if not self.upload_queue.empty():
-                    filename, image_data, metadata, camera_id = self.upload_queue.get()
+                    filename, camera_id = self.upload_queue.get()
+
+                    try:
+                        image_data = self.storage_manager.read_image(filename)
+                        metadata = self.storage_manager.read_metadata(filename)
+                    except FileNotFoundError:
+                        self.logger.warning(f"Camera {camera_id}: Image file not found, skipping {filename}")
+                        continue
+
                     img_size = len(image_data) / 1024
                     self.logger.debug(f"Camera {camera_id}: Uploading {filename} ({img_size:.1f}KB)")
 
@@ -574,6 +614,82 @@ class CameraService:
             except Exception as e:
                 self.logger.error(f"Upload error: {str(e)}", exc_info=True)
                 time.sleep(1)
+
+    def process_ipfs_queue(self):
+        """Process images from the IPFS queue — runs in a dedicated thread"""
+        MAX_BACKOFF = 3600  # 60 min cap
+
+        while self.running:
+            try:
+                try:
+                    filename, camera_id = self.ipfs_queue.get(timeout=1)
+                except queue.Empty:
+                    continue
+
+                # IPFS circuit breaker check
+                now = time.time()
+                if now < self._ipfs_circuit_open_until:
+                    self.logger.debug(
+                        "IPFS circuit open, skipping %s (retry in %.0fs)",
+                        filename,
+                        self._ipfs_circuit_open_until - now
+                    )
+                    continue
+
+                # Read image from disk
+                try:
+                    image_bytes = self.storage_manager.read_image(filename)
+                except FileNotFoundError:
+                    self.logger.warning("IPFS processor: image not found on disk, skipping %s", filename)
+                    continue
+
+                # Upload to IPFS
+                cid = self.ipfs_client.add_image(image_bytes, filename)
+                if cid is None:
+                    self._ipfs_failures += 1
+                    if self._ipfs_failures >= 3:
+                        self._ipfs_circuit_open_until = time.time() + self._ipfs_backoff
+                        self.logger.warning(
+                            "IPFS circuit opened after %d failures; backoff=%ds",
+                            self._ipfs_failures,
+                            self._ipfs_backoff
+                        )
+                        self._ipfs_backoff = min(self._ipfs_backoff * 2, MAX_BACKOFF)
+                    continue
+
+                # Success: reset IPFS circuit breaker
+                self._ipfs_failures = 0
+                self._ipfs_backoff = 300
+
+                # Persist CID to metadata
+                self.storage_manager.update_metadata_fields(filename, {'ipfs_cid': cid})
+
+                # Publish to Kafka if enabled
+                if self._kafka_enabled and hasattr(self, 'kafka_publisher'):
+                    now = time.time()
+                    if now < self._kafka_circuit_open_until:
+                        self.logger.debug("Kafka circuit open, skipping publish for %s", filename)
+                        continue
+
+                    metadata = self.storage_manager.read_metadata(filename)
+                    kafka_ok = self.kafka_publisher.publish_cid(cid, metadata)
+                    if kafka_ok:
+                        self._kafka_failures = 0
+                        self._kafka_backoff = 300
+                        self.storage_manager.update_metadata_fields(filename, {'kafka_published': True})
+                    else:
+                        self._kafka_failures += 1
+                        if self._kafka_failures >= 3:
+                            self._kafka_circuit_open_until = time.time() + self._kafka_backoff
+                            self.logger.warning(
+                                "Kafka circuit opened after %d failures; backoff=%ds",
+                                self._kafka_failures,
+                                self._kafka_backoff
+                            )
+                            self._kafka_backoff = min(self._kafka_backoff * 2, MAX_BACKOFF)
+
+            except Exception as e:
+                self.logger.warning(f"IPFS processor error: {e}", exc_info=True)
 
     def setup_monitoring(self):
         """Initialize system monitoring"""
@@ -619,6 +735,9 @@ class CameraService:
 
         if self.watchdog_usec:
             threads.append(Thread(target=self.watchdog_loop, name="WatchdogNotifier"))
+
+        if self._ipfs_enabled:
+            threads.append(Thread(target=self.process_ipfs_queue, name="IpfsProcessor", daemon=True))
 
         for thread in threads:
             thread.daemon = True  # Ensure threads terminate with main process
@@ -919,6 +1038,26 @@ class CameraService:
         self.cleanup()
         os.execv(sys.executable, ['python'] + sys.argv)
 
+class _MetaLockManager:
+    """Thread-safe LRU lock manager for per-file metadata locks."""
+
+    def __init__(self, maxsize=2000):
+        from collections import OrderedDict
+        self._locks = OrderedDict()
+        self._guard = Lock()
+        self._maxsize = maxsize
+
+    def get(self, filename):
+        with self._guard:
+            if filename in self._locks:
+                self._locks.move_to_end(filename)
+            else:
+                if len(self._locks) >= self._maxsize:
+                    self._locks.popitem(last=False)
+                self._locks[filename] = Lock()
+            return self._locks[filename]
+
+
 class StorageManager:
     def __init__(self, base_path, max_size_gb, cleanup_threshold_gb,
                  retention_days, logger):
@@ -930,6 +1069,7 @@ class StorageManager:
         self.logger = logger
         self.running = True
         self._cleanup_lock = Lock()  # Prevent concurrent cleanup operations
+        self._meta_lock_mgr = _MetaLockManager()
 
         # Create storage directories
         self.uploaded_path = self.base_path / 'uploaded'
@@ -938,6 +1078,9 @@ class StorageManager:
         # Initialize metadata storage
         self.metadata_path = self.base_path / 'metadata'
         self.metadata_path.mkdir(parents=True, exist_ok=True)
+
+        # Grace period (hours) before cleanup deletes files without IPFS CID or Kafka publish
+        self.cleanup_grace_hours = 72
 
     def get_current_size_gb(self):
         """Calculate current storage usage"""
@@ -952,6 +1095,76 @@ class StorageManager:
         except Exception as e:
             self.logger.error(f"Error calculating storage size: {e}")
             return 0
+
+    def find_metadata_path(self, filename):
+        """Return the Path to the metadata file, checking pending and uploaded locations."""
+        pending = self.metadata_path / f"{filename}.json"
+        if pending.exists():
+            return pending
+        uploaded = self.uploaded_path / 'metadata' / f"{filename}.json"
+        if uploaded.exists():
+            return uploaded
+        return None
+
+    def find_image_path(self, filename):
+        """Return the Path to the image file, checking pending and uploaded locations."""
+        pending = self.base_path / filename
+        if pending.exists():
+            return pending
+        uploaded = self.uploaded_path / filename
+        if uploaded.exists():
+            return uploaded
+        return None
+
+    def read_metadata(self, filename):
+        """Read and return metadata dict for filename. Returns {} on any failure."""
+        path = self.find_metadata_path(filename)
+        if path is None:
+            return {}
+        try:
+            with open(path, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            self.logger.warning(f"Failed to read metadata for {filename}: {e}")
+            return {}
+
+    def read_image(self, filename):
+        """Read and return raw image bytes. Raises FileNotFoundError if not found."""
+        path = self.find_image_path(filename)
+        if path is None:
+            raise FileNotFoundError(f"Image not found: {filename}")
+        with open(path, 'rb') as f:
+            return f.read()
+
+    def update_metadata_fields(self, filename, patch):
+        """Atomically merge patch dict into existing metadata for filename."""
+        lock = self._meta_lock_mgr.get(filename)
+        with lock:
+            path = self.find_metadata_path(filename)
+            if path is None:
+                self.logger.warning(f"update_metadata_fields: no metadata file found for {filename}")
+                return
+
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+            except Exception as e:
+                self.logger.warning(f"update_metadata_fields: failed to read {path}: {e}")
+                data = {}
+
+            data.update(patch)
+
+            tmp_path = path.with_suffix('.json.tmp')
+            try:
+                with open(tmp_path, 'w') as f:
+                    json.dump(data, f)
+                os.replace(tmp_path, path)
+            except Exception as e:
+                self.logger.warning(f"update_metadata_fields: failed to write {path}: {e}")
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
 
     def store_image(self, image_data, filename, metadata=None):
         """Store image and its metadata"""
@@ -971,6 +1184,8 @@ class StorageManager:
 
             # Store metadata if provided
             if metadata:
+                metadata.setdefault('ipfs_cid', None)
+                metadata.setdefault('kafka_published', False)
                 metadata_file = self.metadata_path / f"{filename}.json"
                 with open(metadata_file, 'w') as f:
                     json.dump(metadata, f)
@@ -1004,6 +1219,25 @@ class StorageManager:
         except Exception as e:
             self.logger.error(f"Failed to mark {filename} as uploaded: {str(e)}", exc_info=True)
             return False
+
+    def _within_ipfs_grace(self, filename, meta):
+        """Return True if the file is within the IPFS cleanup grace period and not yet fully published."""
+        ipfs_cid = meta.get('ipfs_cid')
+        kafka_published = meta.get('kafka_published', False)
+        # If fully published, no grace needed
+        if ipfs_cid and kafka_published:
+            return False
+        # Check age via metadata timestamp field
+        ts = meta.get('timestamp')
+        if ts:
+            try:
+                capture_time = datetime.strptime(ts, "%Y-%m-%d_%H-%M-%S").timestamp()
+                age_hours = (time.time() - capture_time) / 3600
+                if age_hours < self.cleanup_grace_hours:
+                    return True
+            except Exception:
+                pass
+        return False
 
     def cleanup_old_files(self, force=False):
         """Remove old files to maintain storage limits
@@ -1048,6 +1282,10 @@ class StorageManager:
                         file_age = datetime.now().timestamp() - mtime
                         # Delete if: older than retention OR force mode is on
                         if file_age > retention_seconds or force:
+                            # IPFS grace: skip if within grace period and not yet published
+                            meta = self.read_metadata(file.name)
+                            if not force and self._within_ipfs_grace(file.name, meta):
+                                continue
                             try:
                                 # Remove image and its metadata
                                 file.unlink()
@@ -1082,6 +1320,10 @@ class StorageManager:
                         file_age = datetime.now().timestamp() - mtime
                         # Delete if: older than retention OR force mode is on
                         if file_age > retention_seconds or force:
+                            # IPFS grace: skip if within grace period and not yet published
+                            meta = self.read_metadata(file.name)
+                            if not force and self._within_ipfs_grace(file.name, meta):
+                                continue
                             try:
                                 file.unlink()
                                 current_size_bytes -= file_size

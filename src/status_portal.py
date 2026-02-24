@@ -1281,6 +1281,49 @@ def api_fleet_ping():
     })
 
 
+@app.route('/api/fleet/status')
+@fleet_auth_required
+def api_fleet_status():
+    """Fleet node status — node health + IPFS/Kafka observability flags."""
+    health = query_health_socket() or {}
+
+    ipfs_cfg = config.get('ipfs', {})
+    kafka_cfg = config.get('kafka', {})
+    ipfs_enabled = bool(ipfs_cfg.get('enabled'))
+    kafka_enabled = bool(kafka_cfg.get('enabled'))
+
+    result = {
+        'ok': True,
+        'version': VERSION,
+        'uptime': int(time.time() - start_time),
+        'node_id': config.get('device', {}).get('id', 'unknown'),
+        'timestamp': datetime.now().isoformat(),
+        'ipfs_enabled': ipfs_enabled,
+        'kafka_enabled': kafka_enabled,
+    }
+
+    # Pull IPFS/Kafka observability counters from camera service health socket
+    if ipfs_enabled or kafka_enabled:
+        ipfs_health = health.get('ipfs', {})
+        kafka_health = health.get('kafka', {})
+        result['ipfs'] = {
+            'queue_depth': ipfs_health.get('queue_depth', 0),
+            'success_count': ipfs_health.get('success_count', 0),
+            'fail_count': ipfs_health.get('fail_count', 0),
+            'circuit_breaker_open': ipfs_health.get('circuit_breaker_open', False),
+            'last_error': ipfs_health.get('last_error'),
+        }
+        result['kafka'] = {
+            'queue_depth': kafka_health.get('queue_depth', 0),
+            'success_count': kafka_health.get('success_count', 0),
+            'fail_count': kafka_health.get('fail_count', 0),
+            'circuit_breaker_open': kafka_health.get('circuit_breaker_open', False),
+            'last_error': kafka_health.get('last_error'),
+        }
+
+    return jsonify(result)
+
+
 @app.route('/api/fleet/update/apply', methods=['POST'])
 @fleet_auth_required
 def api_fleet_update_apply():
@@ -1402,6 +1445,20 @@ _retry_upload_state = {
     'errors': [],
 }
 _retry_upload_lock = __import__('threading').Lock()
+
+_retry_ipfs_state = {
+    'running': False,
+    'total': 0,
+    'ipfs_added': 0,
+    'kafka_published': 0,
+    'failed': 0,
+    'skipped': 0,
+    'current_file': None,
+    'started_at': None,
+    'finished_at': None,
+    'errors': [],
+}
+_retry_ipfs_lock = __import__('threading').Lock()
 
 
 def _do_retry_uploads(images, server_url, auth_token, ssl_verify,
@@ -1571,6 +1628,275 @@ def api_fleet_retry_uploads():
 def api_fleet_retry_uploads_status():
     """Poll progress of a running retry-upload operation."""
     return jsonify(_retry_upload_state)
+
+
+def _do_retry_ipfs(images_needing_add, images_needing_kafka,
+                   ipfs_config, kafka_config, rate_limit, storage_base):
+    """Background worker: IPFS-add and/or Kafka-publish pending images."""
+    global _retry_ipfs_state
+
+    # Lazy import to avoid hard dependency
+    try:
+        from ipfs_client import IPFSClient
+        from kafka_publisher import KafkaPublisher
+    except ImportError as e:
+        _retry_ipfs_state['errors'].append(f"Import error: {e}")
+        _retry_ipfs_state['running'] = False
+        _retry_ipfs_state['finished_at'] = datetime.now().isoformat()
+        return
+
+    ipfs_client = IPFSClient(ipfs_config, logger) if ipfs_config.get('enabled') else None
+    kafka_pub = KafkaPublisher(kafka_config, logger) if kafka_config.get('enabled') else None
+
+    def _load_meta(meta_path):
+        try:
+            with open(meta_path, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def _save_meta(meta_path, metadata):
+        try:
+            with open(meta_path, 'w') as f:
+                json.dump(metadata, f)
+        except Exception as e:
+            logger.error(f"Failed to save metadata {meta_path}: {e}")
+
+    # Process images that need IPFS add (and optionally Kafka publish)
+    for filepath, meta_path in images_needing_add:
+        if not _retry_ipfs_state['running']:
+            break
+
+        filename = filepath.name
+        _retry_ipfs_state['current_file'] = filename
+
+        try:
+            image_data = filepath.read_bytes()
+            if len(image_data) == 0:
+                _retry_ipfs_state['skipped'] += 1
+                time.sleep(rate_limit)
+                continue
+
+            metadata = _load_meta(meta_path)
+            if metadata is None:
+                _retry_ipfs_state['skipped'] += 1
+                time.sleep(rate_limit)
+                continue
+
+            if ipfs_client is None:
+                _retry_ipfs_state['failed'] += 1
+                _retry_ipfs_state['errors'].append(f"{filename}: IPFS not configured")
+                time.sleep(rate_limit)
+                continue
+
+            cid = ipfs_client.add_image(image_data, filename)
+            if not cid:
+                _retry_ipfs_state['failed'] += 1
+                _retry_ipfs_state['errors'].append(f"{filename}: IPFS add failed")
+                time.sleep(rate_limit)
+                continue
+
+            metadata['ipfs_cid'] = cid
+            metadata['kafka_published'] = False
+            _save_meta(meta_path, metadata)
+            _retry_ipfs_state['ipfs_added'] += 1
+
+            if kafka_pub and kafka_pub.enabled:
+                ok = kafka_pub.publish_cid(cid, metadata)
+                if ok:
+                    metadata['kafka_published'] = True
+                    _save_meta(meta_path, metadata)
+                    _retry_ipfs_state['kafka_published'] += 1
+                else:
+                    _retry_ipfs_state['errors'].append(f"{filename}: Kafka publish failed (CID={cid})")
+
+        except Exception as e:
+            _retry_ipfs_state['failed'] += 1
+            _retry_ipfs_state['errors'].append(f"{filename}: {e}")
+
+        time.sleep(rate_limit)
+
+    # Process images that already have a CID but need Kafka publish
+    for filepath, meta_path in images_needing_kafka:
+        if not _retry_ipfs_state['running']:
+            break
+
+        filename = filepath.name
+        _retry_ipfs_state['current_file'] = filename
+
+        try:
+            metadata = _load_meta(meta_path)
+            if metadata is None:
+                _retry_ipfs_state['skipped'] += 1
+                time.sleep(rate_limit)
+                continue
+
+            cid = metadata.get('ipfs_cid')
+            if not cid:
+                _retry_ipfs_state['skipped'] += 1
+                time.sleep(rate_limit)
+                continue
+
+            if kafka_pub and kafka_pub.enabled:
+                ok = kafka_pub.publish_cid(cid, metadata)
+                if ok:
+                    metadata['kafka_published'] = True
+                    _save_meta(meta_path, metadata)
+                    _retry_ipfs_state['kafka_published'] += 1
+                else:
+                    _retry_ipfs_state['failed'] += 1
+                    _retry_ipfs_state['errors'].append(f"{filename}: Kafka publish failed (CID={cid})")
+            else:
+                _retry_ipfs_state['skipped'] += 1
+
+        except Exception as e:
+            _retry_ipfs_state['failed'] += 1
+            _retry_ipfs_state['errors'].append(f"{filename}: {e}")
+
+        time.sleep(rate_limit)
+
+    if kafka_pub and kafka_pub.enabled:
+        try:
+            kafka_pub.flush(timeout=10)
+        except Exception:
+            pass
+
+    _retry_ipfs_state['running'] = False
+    _retry_ipfs_state['current_file'] = None
+    _retry_ipfs_state['finished_at'] = datetime.now().isoformat()
+
+
+@app.route('/api/fleet/retry-ipfs', methods=['POST'])
+@fleet_auth_required
+def api_fleet_retry_ipfs():
+    """Retry IPFS upload and/or Kafka publish for images missing CIDs.
+
+    Scans metadata in storage/metadata/ AND uploaded/metadata/ for:
+      - ipfs_cid missing or null  -> needs IPFS add + Kafka publish
+      - ipfs_cid set but kafka_published == false -> needs Kafka publish only
+
+    Accepts JSON body (all optional):
+        rate_limit_seconds: delay between images (default: 5)
+        max_images: max images to process (default: 0 = unlimited)
+        dry_run: if true, just report pending counts (default: false)
+
+    Returns immediately; work runs in background thread.
+    Use GET /api/fleet/retry-ipfs/status to poll progress.
+    """
+    global _retry_ipfs_state
+
+    data = request.get_json(silent=True) or {}
+    rate_limit = data.get('rate_limit_seconds', 5)
+    max_images = data.get('max_images', 0)
+    dry_run = data.get('dry_run', False)
+
+    ipfs_cfg = config.get('ipfs', {})
+    kafka_cfg = config.get('kafka', {})
+
+    if not ipfs_cfg.get('enabled') and not kafka_cfg.get('enabled'):
+        return jsonify({'error': 'Neither ipfs nor kafka is enabled in config'}), 400
+
+    storage_base = Path(config.get('storage', {}).get('base_path', '/opt/sai-cam/storage'))
+    metadata_dirs = [
+        storage_base / 'metadata',
+        storage_base / 'uploaded' / 'metadata',
+    ]
+
+    needs_add = []    # (image_path, meta_path) — no CID yet
+    needs_kafka = []  # (image_path, meta_path) — has CID, not published
+
+    for meta_dir in metadata_dirs:
+        if not meta_dir.exists():
+            continue
+        # Determine the image directory (parent of metadata/)
+        image_dir = meta_dir.parent
+        for meta_path in sorted(meta_dir.glob('*.json')):
+            # Strip the trailing .json to get the image filename
+            img_name = meta_path.stem  # e.g. cam1_20240101_120000.jpg
+            img_path = image_dir / img_name
+            if not img_path.exists():
+                continue
+            try:
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+            except Exception:
+                continue
+            cid = meta.get('ipfs_cid')
+            published = meta.get('kafka_published', False)
+            if not cid:
+                needs_add.append((img_path, meta_path))
+            elif not published and kafka_cfg.get('enabled'):
+                needs_kafka.append((img_path, meta_path))
+
+    if dry_run:
+        return jsonify({
+            'dry_run': True,
+            'needs_ipfs_add': len(needs_add),
+            'needs_kafka_publish': len(needs_kafka),
+            'total_pending': len(needs_add) + len(needs_kafka),
+            'oldest_add': needs_add[0][0].name if needs_add else None,
+            'oldest_kafka': needs_kafka[0][0].name if needs_kafka else None,
+        })
+
+    with _retry_ipfs_lock:
+        if _retry_ipfs_state['running']:
+            return jsonify({
+                'error': 'Retry IPFS already in progress',
+                'status': dict(_retry_ipfs_state),
+            }), 409
+
+    total = len(needs_add) + len(needs_kafka)
+    if total == 0:
+        return jsonify({'ok': True, 'message': 'No pending images for IPFS/Kafka retry',
+                        'total': 0})
+
+    if max_images > 0:
+        # Apply limit across both lists, prioritising needs_add
+        if len(needs_add) >= max_images:
+            needs_add = needs_add[:max_images]
+            needs_kafka = []
+        else:
+            remaining = max_images - len(needs_add)
+            needs_kafka = needs_kafka[:remaining]
+        total = len(needs_add) + len(needs_kafka)
+
+    with _retry_ipfs_lock:
+        _retry_ipfs_state = {
+            'running': True,
+            'total': total,
+            'ipfs_added': 0,
+            'kafka_published': 0,
+            'failed': 0,
+            'skipped': 0,
+            'current_file': None,
+            'started_at': datetime.now().isoformat(),
+            'finished_at': None,
+            'errors': [],
+        }
+
+    thread = Thread(
+        target=_do_retry_ipfs,
+        args=(needs_add, needs_kafka, ipfs_cfg, kafka_cfg,
+              rate_limit, str(storage_base)),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({
+        'ok': True,
+        'message': f'Retry IPFS started for {total} images ({len(needs_add)} need add, {len(needs_kafka)} need kafka)',
+        'total': total,
+        'needs_ipfs_add': len(needs_add),
+        'needs_kafka_publish': len(needs_kafka),
+        'rate_limit_seconds': rate_limit,
+    })
+
+
+@app.route('/api/fleet/retry-ipfs/status')
+@fleet_auth_required
+def api_fleet_retry_ipfs_status():
+    """Poll progress of a running retry-ipfs operation."""
+    return jsonify(_retry_ipfs_state)
 
 
 def main():

@@ -186,7 +186,7 @@ BACKUP_DIR="/var/backups/sai-cam"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 # System packages required for installation
-SYSTEM_PACKAGES="python3-pip python3-opencv python3-venv libsystemd-dev nginx gettext-base"
+SYSTEM_PACKAGES="python3-pip python3-opencv python3-venv libsystemd-dev nginx gettext-base libsasl2-2"
 
 # Default system user (can be overridden by config.yaml)
 DEFAULT_USER="admin"
@@ -338,7 +338,7 @@ except Exception as e:
     sys.exit(0)
 
 # Sections to check (in order they appear in example)
-sections_to_check = ['portal', 'updates', 'fleet', 'wifi_ap', 'metrics']
+sections_to_check = ['portal', 'updates', 'fleet', 'wifi_ap', 'metrics', 'ipfs', 'kafka']
 missing_sections = [s for s in sections_to_check if s not in prod_config]
 
 if not missing_sections:
@@ -1138,6 +1138,8 @@ sudo cp $PROJECT_ROOT/src/status_portal.py $INSTALL_DIR/src/
 sudo cp $PROJECT_ROOT/src/config_helper.py $INSTALL_DIR/src/
 sudo cp $PROJECT_ROOT/src/logging_utils.py $INSTALL_DIR/src/
 sudo cp $PROJECT_ROOT/src/update_manager.py $INSTALL_DIR/src/
+sudo cp $PROJECT_ROOT/src/ipfs_client.py $INSTALL_DIR/src/
+sudo cp $PROJECT_ROOT/src/kafka_publisher.py $INSTALL_DIR/src/
 
 # Copy camera modules
 echo "📦 Installing camera modules..."
@@ -1395,6 +1397,8 @@ sudo chmod 755 $INSTALL_DIR/src/status_portal.py
 sudo chmod 644 $INSTALL_DIR/src/config_helper.py
 sudo chmod 644 $INSTALL_DIR/src/logging_utils.py
 sudo chmod 644 $INSTALL_DIR/src/update_manager.py
+sudo chmod 644 $INSTALL_DIR/src/ipfs_client.py
+sudo chmod 644 $INSTALL_DIR/src/kafka_publisher.py
 sudo find $INSTALL_DIR/src/cameras -name "*.py" -exec chmod 644 {} \;
 
 # Set permissions for portal web assets

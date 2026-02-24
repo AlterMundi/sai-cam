@@ -22,3 +22,6 @@ prometheus-client>=0.20.0  # Prometheus metrics endpoint
 pytest>=7.0.0        # For unit testing
 # black>=22.0.0      # For code formatting
 
+# IPFS/Kafka integration (optional - only needed when ipfs.enabled or kafka.enabled)
+kafka-python-ng>=2.2.2  # Kafka producer for CID publishing
+
