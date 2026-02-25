@@ -37,9 +37,8 @@ from logging_utils import RateLimitedLogger, CameraStateTracker
 
 from version import VERSION
 
-# Force FFMPEG to use TCP transport for all RTSP connections
-# Let codec auto-detect - cameras may use H.264 or H.265
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+# FFMPEG capture options are set from config in CameraService.setup_cameras()
+# Default: "rtsp_transport;tcp" (TCP transport, codec auto-detect)
 
 class CameraInstance:
     """Represents a single camera instance with its own configuration and state"""
@@ -335,6 +334,11 @@ class CameraService:
     def setup_cameras(self):
         """Initialize and configure all cameras from config"""
         try:
+            # Set FFMPEG options from config (default: TCP transport with codec auto-detect)
+            ffmpeg_opts = self.config.get('advanced', {}).get('ffmpeg_options', 'rtsp_transport;tcp')
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = ffmpeg_opts
+            self.logger.info(f"FFMPEG capture options: {ffmpeg_opts}")
+
             # Set FFMPEG debug based on config
             os.environ["OPENCV_FFMPEG_DEBUG"] = "1" if self.config.get('advanced', {}).get('ffmpeg_debug', False) else "0"
             
@@ -692,6 +696,14 @@ class CameraService:
             old_val = old_config.get('advanced', {}).get(key)
             if new_val is not None and new_val != old_val:
                 changes.append(f"advanced.{key}: {old_val} -> {new_val}")
+
+        # 4b. FFMPEG options (applied immediately via env var)
+        new_ffmpeg = new_config.get('advanced', {}).get('ffmpeg_options')
+        old_ffmpeg = old_config.get('advanced', {}).get('ffmpeg_options')
+        if new_ffmpeg is not None and new_ffmpeg != old_ffmpeg:
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = new_ffmpeg
+            changes.append(f"advanced.ffmpeg_options: {old_ffmpeg} -> {new_ffmpeg}")
+            restart_required.append('advanced.ffmpeg_options (active cameras need reconnect)')
 
         # Check for changes that require restart (warn only)
         if new_config.get('cameras') != old_config.get('cameras'):
