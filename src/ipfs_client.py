@@ -26,9 +26,10 @@ class IPFSClient:
         Args:
             config: ipfs sub-dict from the main config.
                     Expected keys:
-                      api_url  - base URL, e.g. 'http://10.x.y.z:5001/api/v0'
-                      backend  - 'kubo' (default) or 'cluster'
-                      timeout  - request timeout in seconds (default 60)
+                      api_url   - base URL, e.g. 'https://ipfs.altermundi.net/api/v0'
+                      api_token - optional Bearer token for reverse-proxy auth
+                      backend   - 'kubo' (default) or 'cluster'
+                      timeout   - request timeout in seconds (default 60)
             logger: standard logging.Logger (or RateLimitedLogger)
         """
         self.logger = logger
@@ -44,9 +45,12 @@ class IPFSClient:
         # We just note the backend for logging; the caller is responsible for setting
         # api_url to the correct endpoint+port.
         self.backend = config.get("backend", "kubo")
+        # Optional Bearer token for reverse-proxy auth (e.g. ipfs.altermundi.net)
+        token = config.get("api_token", "").strip()
+        self._headers = {"Authorization": f"Bearer {token}"} if token else {}
         self.logger.info(
             f"IPFSClient initialised: backend={self.backend} api_url={self.api_url} timeout={self.timeout}s "
-            f"cid_version={self.cid_version} pin={self.pin}"
+            f"cid_version={self.cid_version} pin={self.pin} auth={'yes' if token else 'no'}"
         )
 
     # ------------------------------------------------------------------
@@ -75,7 +79,7 @@ class IPFSClient:
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
                 files = {"file": (filename, io.BytesIO(image_bytes), "image/jpeg")}
-                response = requests.post(url, params=params, files=files, timeout=self.timeout)
+                response = requests.post(url, params=params, files=files, headers=self._headers, timeout=self.timeout)
                 response.raise_for_status()
                 data = response.json()
                 cid = data.get("Hash")
@@ -131,7 +135,7 @@ class IPFSClient:
         """
         url = f"{self.api_url}/version"
         try:
-            response = requests.post(url, timeout=5)
+            response = requests.post(url, headers=self._headers, timeout=5)
             response.raise_for_status()
             data = response.json()
             version = data.get("Version", "unknown")

@@ -138,8 +138,10 @@ fleet:
 # IPFS Integration (optional - disabled by default)
 ipfs:
   enabled: false
-  # Port 5001 for Kubo direct, 9095 for IPFS Cluster proxy
-  api_url: 'http://ZEROTIER_IP:5001/api/v0'
+  # api_url: use https://ipfs.altermundi.net/api/v0 for the central server
+  # or http://ZEROTIER_IP:5001/api/v0 for direct Kubo over ZeroTier
+  api_url: 'https://ipfs.altermundi.net/api/v0'
+  api_token: ''                # Bearer token for reverse-proxy auth (leave empty if not required)
   backend: 'kubo'              # 'kubo' or 'cluster'
   timeout: 60
   cid_version: 1
