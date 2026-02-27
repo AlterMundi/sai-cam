@@ -39,6 +39,11 @@ class RTSPCamera(BaseCamera):
         # Advanced RTSP settings
         self.buffer_size = camera_config.get('buffer_size', 0)
         self.init_wait = global_config.get('advanced', {}).get('camera_init_wait', 2)
+        
+        # Background reader state
+        self.running = False
+        self.read_thread = None
+        self.latest_frame = None
     
     def setup(self) -> bool:
         """Initialize RTSP camera connection"""
@@ -109,6 +114,13 @@ class RTSPCamera(BaseCamera):
                 )
 
                 self.is_connected = True
+                
+                # Start background reader thread
+                self.running = True
+                import threading
+                self.read_thread = threading.Thread(target=self._update_stream, daemon=True)
+                self.read_thread.start()
+                
                 self.reset_reconnect_attempts()
                 return True
                 
@@ -117,60 +129,38 @@ class RTSPCamera(BaseCamera):
             self.is_connected = False
             return False
     
+    def _update_stream(self):
+        """Background thread to constantly read frames and clear FFmpeg buffers"""
+        while self.running and self.is_connected:
+            try:
+                if not self.cap or not self.cap.isOpened():
+                    self.is_connected = False
+                    break
+                    
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    with self.lock:
+                        self.latest_frame = frame
+                else:
+                    self.logger.warning(f"Camera {self.camera_id}: Stream dropped in background reader")
+                    self.is_connected = False
+            except Exception as e:
+                self.logger.warning(f"Camera {self.camera_id}: Background read error: {e}")
+                self.is_connected = False
+                
     def capture_frame(self) -> Optional[np.ndarray]:
-        """Capture frame from RTSP stream.
-
-        If the initial read() fails (common with long capture intervals where
-        the HEVC decoder accumulates errors), automatically reconnects once
-        and retries before returning None.
-        """
+        """Get the latest frame from the background reader thread"""
         if not self.is_connected:
             return None
 
-        try:
-            with self.lock:
-                if not self.cap or not self.cap.isOpened():
-                    self.logger.warning(f"Camera {self.camera_id}: RTSP stream closed unexpectedly")
-                    self.is_connected = False
-                    return None
-
-                ret, frame = self.cap.read()
-
-                if ret and frame is not None:
-                    return frame
-
-            # read() failed — stream likely went stale between captures.
-            # Reconnect once and retry rather than entering backoff.
-            self.logger.info(f"Camera {self.camera_id}: Frame read failed, reconnecting for fresh stream")
-            self.cleanup()
-            if not self.setup():
-                self.logger.warning(f"Camera {self.camera_id}: Reconnect failed during capture retry")
-                self.is_connected = False
-                return None
-
-            with self.lock:
-                ret, frame = self.cap.read()
-                if not ret or frame is None:
-                    self.logger.warning(f"Camera {self.camera_id}: Frame read failed after reconnect")
-                    return None
-                return frame
-
-        except Exception as e:
-            self.logger.warning(f"Camera {self.camera_id}: RTSP capture error: {str(e)}")
+        with self.lock:
+            if self.latest_frame is not None:
+                return self.latest_frame.copy()
             return None
     
     def grab_frame(self) -> bool:
-        """Grab frame without retrieving (useful for keeping stream alive)"""
-        if not self.is_connected:
-            return False
-        
-        try:
-            with self.lock:
-                if self.cap and self.cap.isOpened():
-                    return self.cap.grab()
-                return False
-        except Exception:
-            return False
+        """Background thread handles grabbing, this is a no-op."""
+        return self.is_connected
     
     def reconnect(self) -> bool:
         """Attempt to reconnect to RTSP stream"""
@@ -194,12 +184,15 @@ class RTSPCamera(BaseCamera):
         """Clean up RTSP camera resources"""
         self.logger.debug(f"Camera {self.camera_id}: Cleaning up RTSP resources")
         
+        self.running = False
+        
         with self.lock:
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
         
         self.is_connected = False
+        self.latest_frame = None
     
     def get_camera_info(self) -> Dict[str, Any]:
         """Get RTSP camera information"""
