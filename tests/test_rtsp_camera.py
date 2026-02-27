@@ -147,76 +147,18 @@ class TestRTSPCameraCaptureFrame:
         cam.is_connected = False
         assert cam.capture_frame() is None
 
-    def test_no_cap_returns_none(self, cam):
+    def test_no_frame_returns_none(self, cam):
         cam.is_connected = True
-        cam.cap = None
+        cam.latest_frame = None
         assert cam.capture_frame() is None
-
-    def test_cap_closed_returns_none(self, cam):
-        cam.is_connected = True
-        cam.cap = MagicMock()
-        cam.cap.isOpened.return_value = False
-        result = cam.capture_frame()
-        assert result is None
-        assert cam.is_connected is False
 
     def test_success_returns_frame(self, cam):
         cam.is_connected = True
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-        cam.cap = MagicMock()
-        cam.cap.isOpened.return_value = True
-        cam.cap.read.return_value = (True, frame)
+        cam.latest_frame = frame
         result = cam.capture_frame()
         assert result is not None
         assert result.shape == (1080, 1920, 3)
-
-    @patch("time.sleep")
-    def test_read_fail_triggers_reconnect_retry(self, mock_sleep, cam):
-        """First read fails → cleanup + setup → retry read succeeds."""
-        cam.is_connected = True
-
-        # First cap: read fails
-        cap1 = MagicMock()
-        cap1.isOpened.return_value = True
-        cap1.read.return_value = (False, None)
-        cam.cap = cap1
-
-        # After reconnect: setup creates a new cap
-        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-        cap2 = MagicMock()
-        cap2.isOpened.return_value = True
-        cap2.read.return_value = (True, frame)
-        cap2.get.return_value = 15.0
-
-        import cv2
-        cv2.VideoCapture.return_value = cap2
-
-        result = cam.capture_frame()
-        assert result is not None  # Retry succeeded
-
-    @patch("time.sleep")
-    def test_read_fail_reconnect_also_fails(self, mock_sleep, cam):
-        """First read fails → reconnect fails → returns None."""
-        cam.is_connected = True
-        cap1 = MagicMock()
-        cap1.isOpened.return_value = True
-        cap1.read.return_value = (False, None)
-        cam.cap = cap1
-
-        import cv2
-        cap2 = MagicMock()
-        cap2.isOpened.return_value = False
-        cv2.VideoCapture.return_value = cap2
-
-        result = cam.capture_frame()
-        assert result is None
-
-    def test_exception_returns_none(self, cam):
-        cam.is_connected = True
-        cam.cap = MagicMock()
-        cam.cap.isOpened.return_value = True
-        cam.cap.read.side_effect = RuntimeError("decode error")
-        assert cam.capture_frame() is None
 
 
 # ---------------------------------------------------------------------------
@@ -230,17 +172,8 @@ class TestRTSPCameraGrabFrame:
         cam.is_connected = False
         assert cam.grab_frame() is False
 
-    def test_cap_closed_returns_false(self, cam):
-        cam.is_connected = True
-        cam.cap = MagicMock()
-        cam.cap.isOpened.return_value = False
-        assert cam.grab_frame() is False
-
     def test_success(self, cam):
         cam.is_connected = True
-        cam.cap = MagicMock()
-        cam.cap.isOpened.return_value = True
-        cam.cap.grab.return_value = True
         assert cam.grab_frame() is True
 
 
