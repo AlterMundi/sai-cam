@@ -74,6 +74,23 @@ class RTSPCamera(BaseCamera):
                 actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
 
+                # Validate stream properties for codec mismatches before reading frames
+                if actual_width == 0 or actual_height == 0 or actual_fps >= 10000:
+                    import os
+                    ffmpeg_opts = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "none")
+                    fourcc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+                    codec_str = "".join([chr((fourcc >> 8*i) & 0xFF) for i in range(4)]) if fourcc else "unknown"
+                    
+                    self.logger.error(
+                        f"Camera {self.camera_id}: Degenerate stream metadata "
+                        f"({actual_width}x{actual_height} @ {actual_fps}fps, codec={codec_str}). "
+                        f"This usually means a codec mismatch. FFMPEG options: '{ffmpeg_opts}'. "
+                        f"If the camera sends H.265, try changing it to H.264 or use auto-detect."
+                    )
+                    self.cap.release()
+                    self.cap = None
+                    return False
+
                 # Validate connection with a test frame read
                 # isOpened() can return True before auth completes
                 ret, test_frame = self.cap.read()
@@ -128,6 +145,7 @@ class RTSPCamera(BaseCamera):
             self.cleanup()
             if not self.setup():
                 self.logger.warning(f"Camera {self.camera_id}: Reconnect failed during capture retry")
+                self.is_connected = False
                 return None
 
             with self.lock:

@@ -95,11 +95,12 @@ logging:
 advanced:
   ffmpeg_debug: false
   # FFMPEG capture options (format: key;value|key;value - passed to OPENCV_FFMPEG_CAPTURE_OPTIONS)
-  # Default (auto-detect codec): 'rtsp_transport;tcp'
-  # H.264 forced (RPi4, most cameras): 'rtsp_transport;tcp|video_codec;h264'
+  # Default (auto-detect codec with 5s timeout): 'rtsp_transport;tcp|stimeout;5000000'
+  # H.264 decoder (only if camera sends H.264): 'rtsp_transport;tcp|stimeout;5000000|video_codec;h264'
+  # WARNING: video_codec selects the DECODER, it does NOT transcode the stream.
   # H.265 + VAAPI hw accel (x86 with GPU): 'rtsp_transport;tcp|video_codec;h265|hwaccel;vaapi|hwaccel_device;/dev/dri/renderD128'
   # NOTE: VAAPI does NOT work on RPi4 even if /dev/dri/renderD128 exists
-  ffmpeg_options: 'rtsp_transport;tcp|video_codec;h264'
+  ffmpeg_options: 'rtsp_transport;tcp|stimeout;5000000'
   camera_init_wait: 2
   polling_interval: 0.1
   reconnect_attempts: 3
